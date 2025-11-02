@@ -27,10 +27,10 @@ const (
 	fftSize    = 2048
 
 	// Visualization settings
-	numBars   = 64 // Close to 63, power of 2 for simplicity
-	barWidth  = 16 // Width of each bar
-	barGap    = 4  // Gap between bars
-	centerGap = 20 // Gap between top and bottom bar sections
+	numBars   = 64  // Close to 63, power of 2 for simplicity
+	barWidth  = 16  // Width of each bar
+	barGap    = 4   // Gap between bars
+	centerGap = 100 // Gap between top and bottom bar sections
 
 	// Colors
 	barColorR = 164
@@ -41,7 +41,7 @@ const (
 func main() {
 	var snapshotMode bool
 	var snapshotTime float64
-	
+
 	flag.BoolVar(&snapshotMode, "snapshot", false, "Generate a single PNG frame instead of video")
 	flag.Float64Var(&snapshotTime, "at", 1.0, "Timestamp in seconds for snapshot (default: 1.0)")
 	flag.Parse()
@@ -307,7 +307,7 @@ func drawFrame(barHeights []float64, img *image.RGBA, barRow []byte) {
 		}
 
 		// Draw bar upward from center (with gap/2 offset)
-		for y := centerY - barHeight - centerGap/2; y < centerY - centerGap/2; y++ {
+		for y := centerY - barHeight - centerGap/2; y < centerY-centerGap/2; y++ {
 			if y >= 0 && y < height {
 				offset := y*img.Stride + x*4
 				copy(img.Pix[offset:offset+barWidth*4], barRow)
@@ -315,7 +315,7 @@ func drawFrame(barHeights []float64, img *image.RGBA, barRow []byte) {
 		}
 
 		// Draw mirror bar downward from center (with gap/2 offset)
-		for y := centerY + centerGap/2; y < centerY + barHeight + centerGap/2; y++ {
+		for y := centerY + centerGap/2; y < centerY+barHeight+centerGap/2; y++ {
 			if y >= 0 && y < height {
 				offset := y*img.Stride + x*4
 				copy(img.Pix[offset:offset+barWidth*4], barRow)
