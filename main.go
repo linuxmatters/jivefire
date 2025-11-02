@@ -159,14 +159,14 @@ func main() {
 		barHeights := binFFT(coeffs)
 		totalBin += time.Since(t0)
 
-		// Apply smoothing: bars rise quickly (0.8) but fall slowly (0.08)
+		// Apply smoothing: balanced response - smooth but still connected to audio
 		for i := range barHeights {
 			if barHeights[i] > prevBarHeights[i] {
-				// Rising: blend 80% new, 20% old (fast rise)
-				prevBarHeights[i] = barHeights[i]*0.8 + prevBarHeights[i]*0.2
+				// Rising: blend 60% new, 40% old (fairly responsive rise)
+				prevBarHeights[i] = barHeights[i]*0.6 + prevBarHeights[i]*0.4
 			} else {
-				// Falling: blend 8% new, 92% old (slow decay)
-				prevBarHeights[i] = barHeights[i]*0.08 + prevBarHeights[i]*0.92
+				// Falling: blend 5% new, 95% old (smooth decay but not too slow)
+				prevBarHeights[i] = barHeights[i]*0.05 + prevBarHeights[i]*0.95
 			}
 		}
 
@@ -249,14 +249,19 @@ func binFFT(coeffs []complex128) []float64 {
 	// Use only first half (positive frequencies)
 	halfSize := len(coeffs) / 2
 
+	// Focus on frequency range where most audio content is
+	// Use first 3/4 of spectrum (0 to ~16.5kHz) for better balance
+	// between bass energy and mid/high content
+	maxFreqBin := (halfSize * 3) / 4
+
 	barHeights := make([]float64, numBars)
-	binsPerBar := halfSize / numBars
+	binsPerBar := maxFreqBin / numBars
 
 	for bar := 0; bar < numBars; bar++ {
 		start := bar * binsPerBar
 		end := start + binsPerBar
-		if end > halfSize {
-			end = halfSize
+		if end > maxFreqBin {
+			end = maxFreqBin
 		}
 
 		// Average magnitude in this range
@@ -269,7 +274,7 @@ func binFFT(coeffs []complex128) []float64 {
 		barHeights[bar] = sum / float64(binsPerBar)
 	}
 
-	// Normalize and apply log scale
+	// Normalize and apply log scale with noise gate
 	maxVal := 0.0
 	for _, h := range barHeights {
 		if h > maxVal {
@@ -281,9 +286,17 @@ func binFFT(coeffs []complex128) []float64 {
 		// Calculate max height with cap applied
 		availableHeight := float64(height/2) * maxBarHeight
 
+		// Noise gate threshold (17.5% of max) - aggressively suppress quiet sounds
+		noiseThreshold := maxVal * 0.175
+
 		for i := range barHeights {
-			// Log scale and normalize with height cap
-			barHeights[i] = math.Log10(1+barHeights[i]*9/maxVal) * availableHeight
+			// Apply noise gate first
+			if barHeights[i] < noiseThreshold {
+				barHeights[i] = 0
+			} else {
+				// Log scale and normalize with height cap
+				barHeights[i] = math.Log10(1+barHeights[i]*9/maxVal) * availableHeight
+			}
 		}
 	}
 
@@ -291,23 +304,21 @@ func binFFT(coeffs []complex128) []float64 {
 }
 
 func rearrangeFrequenciesCenterOut(barHeights []float64) []float64 {
-	// Rearrange bars so most active frequencies (low indices) are in the center
-	// and less active frequencies (high indices) are on the outer edges
-	// Input:  [0, 1, 2, 3, 4, 5, ...] (left to right, low to high freq)
-	// Output: [3, 1, 0, 2, 4, 5, ...] (center to edges, creating symmetry)
+	// Create a symmetric mirror pattern with most active frequencies at CENTER:
+	// Left side: frequencies 0→31 placed from CENTER → LEFT EDGE (most active at center)
+	// Right side: frequencies 0→31 mirrored from CENTER → RIGHT EDGE
+	// Result: Most active (bass) at center, less active (highs) at edges
 
-	rearranged := make([]float64, len(barHeights))
-	center := len(barHeights) / 2
+	n := len(barHeights)
+	rearranged := make([]float64, n)
+	center := n / 2
 
-	for i := 0; i < len(barHeights); i++ {
-		// Place bars alternating left and right from center
-		if i%2 == 0 {
-			// Even indices go to right of center
-			rearranged[center+i/2] = barHeights[i]
-		} else {
-			// Odd indices go to left of center
-			rearranged[center-1-i/2] = barHeights[i]
-		}
+	// Place first half of frequencies mirrored from center outward
+	for i := 0; i < n/2; i++ {
+		// Left side: place from center going left (most active near center)
+		rearranged[center-1-i] = barHeights[i]
+		// Right side: mirror (most active near center)
+		rearranged[center+i] = barHeights[i]
 	}
 
 	return rearranged
