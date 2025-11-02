@@ -15,6 +15,9 @@ import (
 
 	"github.com/go-audio/audio"
 	"github.com/go-audio/wav"
+	"github.com/golang/freetype"
+	"github.com/golang/freetype/truetype"
+	"golang.org/x/image/font"
 	"gonum.org/v1/gonum/dsp/fourier"
 )
 
@@ -123,6 +126,14 @@ func main() {
 		fmt.Printf("Warning: Could not load bg.png: %v\n", err)
 		fmt.Printf("Continuing with black background...\n")
 		bgImage = nil
+	}
+
+	// Load font for center text
+	fontFace, err := loadFont("Poppins-Regular.ttf", 48)
+	if err != nil {
+		fmt.Printf("Warning: Could not load Poppins-Regular.ttf: %v\n", err)
+		fmt.Printf("Continuing without text...\n")
+		fontFace = nil
 	}
 
 	// Reuse image buffer across frames to reduce allocations
@@ -264,7 +275,7 @@ func main() {
 
 		// Generate frame image
 		t0 = time.Now()
-		drawFrame(rearrangedHeights, img, barRow, bgImage)
+		drawFrame(rearrangedHeights, img, barRow, bgImage, fontFace)
 		totalDraw += time.Since(t0)
 
 		// Write raw RGB to FFmpeg
@@ -413,6 +424,26 @@ func loadBackgroundImage(filename string) (*image.RGBA, error) {
 	return rgba, nil
 }
 
+func loadFont(fontPath string, size float64) (font.Face, error) {
+	fontBytes, err := os.ReadFile(fontPath)
+	if err != nil {
+		return nil, err
+	}
+
+	f, err := truetype.Parse(fontBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	face := truetype.NewFace(f, &truetype.Options{
+		Size:    size,
+		DPI:     72,
+		Hinting: font.HintingFull,
+	})
+
+	return face, nil
+}
+
 func applyHanning(data []float64) []float64 {
 	windowed := make([]float64, len(data))
 	n := len(data)
@@ -501,7 +532,27 @@ func rearrangeFrequenciesCenterOut(barHeights []float64) []float64 {
 	return rearranged
 }
 
-func drawFrame(barHeights []float64, img *image.RGBA, barRow []byte, bgImage *image.RGBA) {
+func drawCenterText(img *image.RGBA, face font.Face, text string, centerY int) {
+	// Create a drawer
+	d := &font.Drawer{
+		Dst:  img,
+		Src:  image.NewUniform(color.RGBA{R: 248, G: 179, B: 29, A: 255}), // #F8B31D (brand yellow)
+		Face: face,
+	}
+
+	// Measure text width
+	bounds, _ := d.BoundString(text)
+	textWidth := (bounds.Max.X - bounds.Min.X).Ceil()
+
+	// Calculate centered position
+	x := (width - textWidth) / 2
+	y := centerY + 10 // Slightly below center for better visual alignment
+
+	d.Dot = freetype.Pt(x, y)
+	d.DrawString(text)
+}
+
+func drawFrame(barHeights []float64, img *image.RGBA, barRow []byte, bgImage *image.RGBA, fontFace font.Face) {
 	if bgImage != nil {
 		// Copy background image
 		draw.Draw(img, img.Bounds(), bgImage, image.Point{0, 0}, draw.Src)
@@ -517,6 +568,11 @@ func drawFrame(barHeights []float64, img *image.RGBA, barRow []byte, bgImage *im
 
 	// Center point
 	centerY := height / 2
+
+	// Draw center text if font is loaded
+	if fontFace != nil {
+		drawCenterText(img, fontFace, "Linux Matters Sample Text", centerY)
+	}
 
 	// Calculate starting position to center all bars
 	totalWidth := numBars*barWidth + (numBars-1)*barGap
@@ -617,6 +673,13 @@ func generateSnapshot(samples []float64, outputFile string, atTime float64) {
 		bgImage = nil
 	}
 
+	// Load font
+	fontFace, err := loadFont("Poppins-Regular.ttf", 48)
+	if err != nil {
+		fmt.Printf("Warning: Could not load Poppins-Regular.ttf: %v\n", err)
+		fontFace = nil
+	}
+
 	// Create image
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
 
@@ -633,7 +696,7 @@ func generateSnapshot(samples []float64, outputFile string, atTime float64) {
 	rearrangedHeights := rearrangeFrequenciesCenterOut(barHeights)
 
 	// Draw frame
-	drawFrame(rearrangedHeights, img, barRow, bgImage)
+	drawFrame(rearrangedHeights, img, barRow, bgImage, fontFace)
 
 	// Save as PNG
 	f, err := os.Create(outputFile)
