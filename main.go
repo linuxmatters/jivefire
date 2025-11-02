@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"image"
+	"image/draw"
 	"image/png"
 	"io"
 	"math"
@@ -114,6 +115,14 @@ func main() {
 	// Profiling variables
 	var totalFFT, totalBin, totalDraw, totalWrite time.Duration
 	startTime := time.Now()
+
+	// Load background image
+	bgImage, err := loadBackgroundImage("bg.png")
+	if err != nil {
+		fmt.Printf("Warning: Could not load bg.png: %v\n", err)
+		fmt.Printf("Continuing with black background...\n")
+		bgImage = nil
+	}
 
 	// Reuse image buffer across frames to reduce allocations
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
@@ -254,7 +263,7 @@ func main() {
 
 		// Generate frame image
 		t0 = time.Now()
-		drawFrame(rearrangedHeights, img, barRow)
+		drawFrame(rearrangedHeights, img, barRow, bgImage)
 		totalDraw += time.Since(t0)
 
 		// Write raw RGB to FFmpeg
@@ -312,6 +321,44 @@ func readWAV(filename string) ([]float64, error) {
 	}
 
 	return samples, nil
+}
+
+func loadBackgroundImage(filename string) (*image.RGBA, error) {
+	f, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	img, err := png.Decode(f)
+	if err != nil {
+		return nil, err
+	}
+
+	bounds := img.Bounds()
+	
+	// Convert to RGBA
+	rgba := image.NewRGBA(image.Rect(0, 0, width, height))
+	
+	// If dimensions don't match, scale the image
+	if bounds.Dx() != width || bounds.Dy() != height {
+		// Simple nearest-neighbor scaling
+		scaleX := float64(bounds.Dx()) / float64(width)
+		scaleY := float64(bounds.Dy()) / float64(height)
+		
+		for y := 0; y < height; y++ {
+			for x := 0; x < width; x++ {
+				srcX := int(float64(x) * scaleX)
+				srcY := int(float64(y) * scaleY)
+				rgba.Set(x, y, img.At(srcX, srcY))
+			}
+		}
+	} else {
+		// Direct copy if dimensions match
+		draw.Draw(rgba, rgba.Bounds(), img, bounds.Min, draw.Src)
+	}
+
+	return rgba, nil
 }
 
 func applyHanning(data []float64) []float64 {
@@ -402,13 +449,18 @@ func rearrangeFrequenciesCenterOut(barHeights []float64) []float64 {
 	return rearranged
 }
 
-func drawFrame(barHeights []float64, img *image.RGBA, barRow []byte) {
-	// Fast clear to black - memset style
-	for i := 0; i < len(img.Pix); i += 4 {
-		img.Pix[i] = 0     // R
-		img.Pix[i+1] = 0   // G
-		img.Pix[i+2] = 0   // B
-		img.Pix[i+3] = 255 // A
+func drawFrame(barHeights []float64, img *image.RGBA, barRow []byte, bgImage *image.RGBA) {
+	if bgImage != nil {
+		// Copy background image
+		draw.Draw(img, img.Bounds(), bgImage, image.Point{0, 0}, draw.Src)
+	} else {
+		// Fast clear to black - memset style
+		for i := 0; i < len(img.Pix); i += 4 {
+			img.Pix[i] = 0     // R
+			img.Pix[i+1] = 0   // G
+			img.Pix[i+2] = 0   // B
+			img.Pix[i+3] = 255 // A
+		}
 	}
 
 	// Center point
@@ -506,6 +558,13 @@ func generateSnapshot(samples []float64, outputFile string, atTime float64) {
 	// Compute magnitudes and bin into bars (sensitivity=1.0 for snapshot)
 	barHeights := binFFT(coeffs, 1.0)
 
+	// Load background image
+	bgImage, err := loadBackgroundImage("bg.png")
+	if err != nil {
+		fmt.Printf("Warning: Could not load bg.png: %v\n", err)
+		bgImage = nil
+	}
+
 	// Create image
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
 
@@ -522,7 +581,7 @@ func generateSnapshot(samples []float64, outputFile string, atTime float64) {
 	rearrangedHeights := rearrangeFrequenciesCenterOut(barHeights)
 
 	// Draw frame
-	drawFrame(rearrangedHeights, img, barRow)
+	drawFrame(rearrangedHeights, img, barRow, bgImage)
 
 	// Save as PNG
 	f, err := os.Create(outputFile)
