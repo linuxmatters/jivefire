@@ -1,0 +1,319 @@
+package main
+
+import (
+	"fmt"
+	"image"
+	"io"
+	"math"
+	"os"
+	"os/exec"
+	"time"
+
+	"github.com/go-audio/audio"
+	"github.com/go-audio/wav"
+	"gonum.org/v1/gonum/dsp/fourier"
+)
+
+const (
+	// Video settings
+	width  = 1280
+	height = 720
+	fps    = 30
+
+	// Audio settings
+	sampleRate = 44100
+	fftSize    = 2048
+
+	// Visualization settings
+	numBars  = 64 // Close to 63, power of 2 for simplicity
+	barWidth = 20
+
+	// Colors
+	barColorR = 164
+	barColorG = 0
+	barColorB = 0
+)
+
+func main() {
+	if len(os.Args) < 3 {
+		fmt.Println("Usage: visualizer-go <input.wav> <output.mp4>")
+		os.Exit(1)
+	}
+
+	inputFile := os.Args[1]
+	outputFile := os.Args[2]
+
+	fmt.Printf("Reading audio: %s\n", inputFile)
+	samples, err := readWAV(inputFile)
+	if err != nil {
+		fmt.Printf("Error reading WAV: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Loaded %d samples\n", len(samples))
+	fmt.Printf("Generating visualization...\n")
+
+	// Start FFmpeg process with optimized settings
+	cmd := exec.Command("ffmpeg",
+		"-y",
+		"-f", "rawvideo",
+		"-pixel_format", "rgb24",
+		"-video_size", fmt.Sprintf("%dx%d", width, height),
+		"-framerate", fmt.Sprintf("%d", fps),
+		"-i", "pipe:0",
+		"-i", inputFile,
+		"-c:v", "libx264",
+		"-preset", "ultrafast", // Much faster encoding
+		"-crf", "23",
+		"-c:a", "aac",
+		"-b:a", "192k",
+		"-pix_fmt", "yuv420p",
+		"-shortest",
+		outputFile,
+	)
+
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		fmt.Printf("Error creating pipe: %v\n", err)
+		os.Exit(1)
+	}
+
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Start(); err != nil {
+		fmt.Printf("Error starting FFmpeg: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Calculate frames
+	samplesPerFrame := sampleRate / fps
+	numFrames := len(samples) / samplesPerFrame
+
+	fft := fourier.NewFFT(fftSize)
+
+	// Profiling variables
+	var totalFFT, totalBin, totalDraw, totalWrite time.Duration
+	startTime := time.Now()
+
+	// Reuse image buffer across frames to reduce allocations
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+	
+	// Pre-create a single row of bar pixels (reused across all frames)
+	barRow := make([]byte, barWidth*4)
+	for i := 0; i < barWidth*4; i += 4 {
+		barRow[i] = barColorR
+		barRow[i+1] = barColorG
+		barRow[i+2] = barColorB
+		barRow[i+3] = 255
+	}
+
+	for frame := 0; frame < numFrames; frame++ {
+		start := frame * samplesPerFrame
+		end := start + fftSize
+		if end > len(samples) {
+			end = len(samples)
+		}
+
+		// Get FFT of this chunk
+		chunk := samples[start:end]
+		// Pad if needed
+		if len(chunk) < fftSize {
+			padded := make([]float64, fftSize)
+			copy(padded, chunk)
+			chunk = padded
+		}
+
+		// Apply Hanning window
+		windowed := applyHanning(chunk)
+
+		// Compute FFT
+		t0 := time.Now()
+		coeffs := fft.Coefficients(nil, windowed)
+		totalFFT += time.Since(t0)
+
+		// Compute magnitudes and bin into bars
+		t0 = time.Now()
+		barHeights := binFFT(coeffs)
+		totalBin += time.Since(t0)
+
+		// Generate frame image
+		t0 = time.Now()
+		drawFrame(barHeights, img, barRow)
+		totalDraw += time.Since(t0)
+
+		// Write raw RGB to FFmpeg
+		t0 = time.Now()
+		writeRawRGB(stdin, img)
+		totalWrite += time.Since(t0)
+
+		if frame%30 == 0 {
+			fmt.Printf("\rFrame %d/%d", frame, numFrames)
+		}
+	}
+
+	fmt.Printf("\nClosing FFmpeg...\n")
+	stdin.Close()
+
+	if err := cmd.Wait(); err != nil {
+		fmt.Printf("FFmpeg error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Print profiling results
+	totalTime := time.Since(startTime)
+	fmt.Printf("\nPerformance Profile:\n")
+	fmt.Printf("  FFT computation:   %v (%.1f%%)\n", totalFFT, float64(totalFFT)/float64(totalTime)*100)
+	fmt.Printf("  Bar binning:       %v (%.1f%%)\n", totalBin, float64(totalBin)/float64(totalTime)*100)
+	fmt.Printf("  Frame drawing:     %v (%.1f%%)\n", totalDraw, float64(totalDraw)/float64(totalTime)*100)
+	fmt.Printf("  FFmpeg writing:    %v (%.1f%%)\n", totalWrite, float64(totalWrite)/float64(totalTime)*100)
+	fmt.Printf("  Total time:        %v\n", totalTime)
+	fmt.Printf("  Speed:             %.2fx realtime\n", float64(len(samples))/float64(sampleRate)/totalTime.Seconds())
+
+	fmt.Printf("\nDone! Output: %s\n", outputFile)
+}
+
+func readWAV(filename string) ([]float64, error) {
+	f, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	decoder := wav.NewDecoder(f)
+	if !decoder.IsValidFile() {
+		return nil, fmt.Errorf("invalid WAV file")
+	}
+
+	buf, err := decoder.FullPCMBuffer()
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert to float64
+	samples := make([]float64, len(buf.Data))
+	for i, s := range buf.Data {
+		samples[i] = float64(s) / float64(audio.IntMaxSignedValue(int(decoder.BitDepth)))
+	}
+
+	return samples, nil
+}
+
+func applyHanning(data []float64) []float64 {
+	windowed := make([]float64, len(data))
+	n := len(data)
+	for i := range data {
+		window := 0.5 * (1 - math.Cos(2*math.Pi*float64(i)/float64(n-1)))
+		windowed[i] = data[i] * window
+	}
+	return windowed
+}
+
+func binFFT(coeffs []complex128) []float64 {
+	// Use only first half (positive frequencies)
+	halfSize := len(coeffs) / 2
+
+	barHeights := make([]float64, numBars)
+	binsPerBar := halfSize / numBars
+
+	for bar := 0; bar < numBars; bar++ {
+		start := bar * binsPerBar
+		end := start + binsPerBar
+		if end > halfSize {
+			end = halfSize
+		}
+
+		// Average magnitude in this range
+		var sum float64
+		for i := start; i < end; i++ {
+			magnitude := math.Sqrt(real(coeffs[i])*real(coeffs[i]) + imag(coeffs[i])*imag(coeffs[i]))
+			sum += magnitude
+		}
+
+		barHeights[bar] = sum / float64(binsPerBar)
+	}
+
+	// Normalize and apply log scale
+	maxVal := 0.0
+	for _, h := range barHeights {
+		if h > maxVal {
+			maxVal = h
+		}
+	}
+
+	if maxVal > 0 {
+		for i := range barHeights {
+			// Log scale and normalize
+			barHeights[i] = math.Log10(1+barHeights[i]*9/maxVal) * float64(height/2)
+		}
+	}
+
+	return barHeights
+}
+
+func drawFrame(barHeights []float64, img *image.RGBA, barRow []byte) {
+	// Fast clear to black - memset style
+	for i := 0; i < len(img.Pix); i += 4 {
+		img.Pix[i] = 0     // R
+		img.Pix[i+1] = 0   // G
+		img.Pix[i+2] = 0   // B
+		img.Pix[i+3] = 255 // A
+	}
+
+	// Center point
+	centerY := height / 2
+
+	// Calculate spacing
+	totalBarWidth := numBars * barWidth
+	spacing := (width - totalBarWidth) / (numBars + 1)
+
+	for i, h := range barHeights {
+		barHeight := int(h)
+		x := spacing + i*(barWidth+spacing)
+		if x+barWidth > width {
+			continue
+		}
+
+		// Draw bar upward from center - copy pre-made row
+		for y := centerY - barHeight; y < centerY; y++ {
+			if y >= 0 && y < height {
+				offset := y*img.Stride + x*4
+				copy(img.Pix[offset:offset+barWidth*4], barRow)
+			}
+		}
+
+		// Draw mirror bar downward from center
+		for y := centerY; y < centerY+barHeight; y++ {
+			if y >= 0 && y < height {
+				offset := y*img.Stride + x*4
+				copy(img.Pix[offset:offset+barWidth*4], barRow)
+			}
+		}
+	}
+}
+
+func writeRawRGB(w io.WriteCloser, img *image.RGBA) {
+	// Write raw RGB24 data directly from pixel buffer
+	// This is MUCH faster than img.At() which does bounds checking and color conversion
+	bounds := img.Bounds()
+	width := bounds.Dx()
+	height := bounds.Dy()
+
+	// Pre-allocate buffer for one row (3 bytes per pixel for RGB24)
+	rowBuf := make([]byte, width*3)
+
+	for y := 0; y < height; y++ {
+		// Direct access to RGBA pixel buffer (4 bytes per pixel)
+		rowStart := y * img.Stride
+		bufIdx := 0
+
+		for x := 0; x < width; x++ {
+			pixelIdx := rowStart + x*4
+			rowBuf[bufIdx] = img.Pix[pixelIdx]     // R
+			rowBuf[bufIdx+1] = img.Pix[pixelIdx+1] // G
+			rowBuf[bufIdx+2] = img.Pix[pixelIdx+2] // B
+			bufIdx += 3
+		}
+
+		w.Write(rowBuf)
+	}
+}
