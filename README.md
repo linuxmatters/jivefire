@@ -12,7 +12,7 @@ CLI audio visualizer written in Go that generates **discrete frequency bars** fo
 
 ## Current Status: Production Ready ✅
 
-**Performance: ~9x realtime speed** 
+**Performance: ~9x realtime speed**
 - 72-second audio → 8 seconds processing time
 - **89x improvement** from initial 0.102x implementation
 
@@ -23,6 +23,7 @@ CLI audio visualizer written in Go that generates **discrete frequency bars** fo
 - ✅ FFT-based analysis (2048-point, Hanning window, log scale)
 - ✅ Proper bar spacing and layout
 - ✅ Production-ready performance
+- ✅ Smoothing/decay animation (fast rise 0.8, slow decay 0.92)
 
 **Performance Profile:**
 - Frame drawing: 48.6% (optimized with buffer reuse, copy operations)
@@ -43,7 +44,7 @@ CLI audio visualizer written in Go that generates **discrete frequency bars** fo
 - **Sample rate:** 44.1kHz ✅
 - **FFT:** 2048-point ✅, Hanning window ✅
 - **Scaling:** Logarithmic ✅
-- **Smoothing:** Decay animation (down 0.08, up 0.8) - TODO
+- **Smoothing:** Decay animation (fast rise 0.8, slow decay 0.92) ✅
 - **Frequency binning:** Group FFT results into discrete bars ✅
 
 ### Output
@@ -84,13 +85,14 @@ FFmpeg: Encode video + mux audio
 - ✅ Pre-computed bar pixel row with copy operations - eliminated nested loops
 - ✅ FFmpeg preset `ultrafast` for faster encoding
 - ✅ Direct stride-based pixel addressing
+- ✅ Temporal smoothing (fast rise 0.8, slow decay 0.92) - smoother animation
 
 **Result:** From 0.102x to ~9x realtime (89x speedup)
 
 **TODO:**
+- Background image support (PNG provided later)
 - Yellow text overlay RGB(254,184,30) for episode/title
-- Reduce to 63 bars (from 64) for brand consistency
-- Smoothing/decay animation (down 0.08, up 0.8)
+- Static logo overlays (Linux Matters logo)
 
 ## Requirements
 

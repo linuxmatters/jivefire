@@ -97,7 +97,7 @@ func main() {
 
 	// Reuse image buffer across frames to reduce allocations
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
-	
+
 	// Pre-create a single row of bar pixels (reused across all frames)
 	barRow := make([]byte, barWidth*4)
 	for i := 0; i < barWidth*4; i += 4 {
@@ -106,6 +106,9 @@ func main() {
 		barRow[i+2] = barColorB
 		barRow[i+3] = 255
 	}
+
+	// Smoothing: track previous bar heights for temporal smoothing
+	prevBarHeights := make([]float64, numBars)
 
 	for frame := 0; frame < numFrames; frame++ {
 		start := frame * samplesPerFrame
@@ -136,9 +139,20 @@ func main() {
 		barHeights := binFFT(coeffs)
 		totalBin += time.Since(t0)
 
+		// Apply smoothing: bars rise quickly (0.8) but fall slowly (0.08)
+		for i := range barHeights {
+			if barHeights[i] > prevBarHeights[i] {
+				// Rising: blend 80% new, 20% old (fast rise)
+				prevBarHeights[i] = barHeights[i]*0.8 + prevBarHeights[i]*0.2
+			} else {
+				// Falling: blend 8% new, 92% old (slow decay)
+				prevBarHeights[i] = barHeights[i]*0.08 + prevBarHeights[i]*0.92
+			}
+		}
+
 		// Generate frame image
 		t0 = time.Now()
-		drawFrame(barHeights, img, barRow)
+		drawFrame(prevBarHeights, img, barRow)
 		totalDraw += time.Since(t0)
 
 		// Write raw RGB to FFmpeg
