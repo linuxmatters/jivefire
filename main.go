@@ -1,8 +1,10 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"image"
+	"image/png"
 	"io"
 	"math"
 	"os"
@@ -25,8 +27,10 @@ const (
 	fftSize    = 2048
 
 	// Visualization settings
-	numBars  = 64 // Close to 63, power of 2 for simplicity
-	barWidth = 20
+	numBars   = 64 // Close to 63, power of 2 for simplicity
+	barWidth  = 16 // Width of each bar
+	barGap    = 4  // Gap between bars
+	centerGap = 20 // Gap between top and bottom bar sections
 
 	// Colors
 	barColorR = 164
@@ -35,13 +39,22 @@ const (
 )
 
 func main() {
-	if len(os.Args) < 3 {
-		fmt.Println("Usage: visualizer-go <input.wav> <output.mp4>")
+	var snapshotMode bool
+	var snapshotTime float64
+	
+	flag.BoolVar(&snapshotMode, "snapshot", false, "Generate a single PNG frame instead of video")
+	flag.Float64Var(&snapshotTime, "at", 1.0, "Timestamp in seconds for snapshot (default: 1.0)")
+	flag.Parse()
+
+	args := flag.Args()
+	if len(args) < 2 {
+		fmt.Println("Usage: visualizer-go [--snapshot] [--at=1.0] <input.wav> <output>")
+		fmt.Println("  output: .mp4 for video, .png for snapshot")
 		os.Exit(1)
 	}
 
-	inputFile := os.Args[1]
-	outputFile := os.Args[2]
+	inputFile := args[0]
+	outputFile := args[1]
 
 	fmt.Printf("Reading audio: %s\n", inputFile)
 	samples, err := readWAV(inputFile)
@@ -51,6 +64,12 @@ func main() {
 	}
 
 	fmt.Printf("Loaded %d samples\n", len(samples))
+
+	if snapshotMode {
+		generateSnapshot(samples, outputFile, snapshotTime)
+		return
+	}
+
 	fmt.Printf("Generating visualization...\n")
 
 	// Start FFmpeg process with optimized settings
@@ -276,27 +295,27 @@ func drawFrame(barHeights []float64, img *image.RGBA, barRow []byte) {
 	// Center point
 	centerY := height / 2
 
-	// Calculate spacing
-	totalBarWidth := numBars * barWidth
-	spacing := (width - totalBarWidth) / (numBars + 1)
+	// Calculate starting position to center all bars
+	totalWidth := numBars*barWidth + (numBars-1)*barGap
+	startX := (width - totalWidth) / 2
 
 	for i, h := range barHeights {
 		barHeight := int(h)
-		x := spacing + i*(barWidth+spacing)
+		x := startX + i*(barWidth+barGap)
 		if x+barWidth > width {
 			continue
 		}
 
-		// Draw bar upward from center - copy pre-made row
-		for y := centerY - barHeight; y < centerY; y++ {
+		// Draw bar upward from center (with gap/2 offset)
+		for y := centerY - barHeight - centerGap/2; y < centerY - centerGap/2; y++ {
 			if y >= 0 && y < height {
 				offset := y*img.Stride + x*4
 				copy(img.Pix[offset:offset+barWidth*4], barRow)
 			}
 		}
 
-		// Draw mirror bar downward from center
-		for y := centerY; y < centerY+barHeight; y++ {
+		// Draw mirror bar downward from center (with gap/2 offset)
+		for y := centerY + centerGap/2; y < centerY + barHeight + centerGap/2; y++ {
 			if y >= 0 && y < height {
 				offset := y*img.Stride + x*4
 				copy(img.Pix[offset:offset+barWidth*4], barRow)
@@ -330,4 +349,71 @@ func writeRawRGB(w io.WriteCloser, img *image.RGBA) {
 
 		w.Write(rowBuf)
 	}
+}
+
+func generateSnapshot(samples []float64, outputFile string, atTime float64) {
+	fmt.Printf("Generating snapshot at %.2f seconds...\n", atTime)
+
+	// Calculate the frame position
+	samplesPerFrame := sampleRate / fps
+	frameNumber := int(atTime * float64(fps))
+	start := frameNumber * samplesPerFrame
+	end := start + fftSize
+
+	if start >= len(samples) {
+		fmt.Printf("Error: timestamp %.2f is beyond audio duration\n", atTime)
+		os.Exit(1)
+	}
+
+	if end > len(samples) {
+		end = len(samples)
+	}
+
+	// Get FFT of this chunk
+	chunk := samples[start:end]
+	if len(chunk) < fftSize {
+		padded := make([]float64, fftSize)
+		copy(padded, chunk)
+		chunk = padded
+	}
+
+	// Apply Hanning window
+	windowed := applyHanning(chunk)
+
+	// Compute FFT
+	fft := fourier.NewFFT(fftSize)
+	coeffs := fft.Coefficients(nil, windowed)
+
+	// Compute magnitudes and bin into bars
+	barHeights := binFFT(coeffs)
+
+	// Create image
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+
+	// Pre-create bar pixel row
+	barRow := make([]byte, barWidth*4)
+	for i := 0; i < barWidth*4; i += 4 {
+		barRow[i] = barColorR
+		barRow[i+1] = barColorG
+		barRow[i+2] = barColorB
+		barRow[i+3] = 255
+	}
+
+	// Draw frame
+	drawFrame(barHeights, img, barRow)
+
+	// Save as PNG
+	f, err := os.Create(outputFile)
+	if err != nil {
+		fmt.Printf("Error creating output file: %v\n", err)
+		os.Exit(1)
+	}
+	defer f.Close()
+
+	if err := png.Encode(f, img); err != nil {
+		fmt.Printf("Error encoding PNG: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Snapshot saved to: %s\n", outputFile)
 }

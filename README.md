@@ -10,6 +10,22 @@ CLI audio visualizer written in Go that generates **discrete frequency bars** fo
 
 **Original Tool:** Replacing moribund `djfun/audio-visualizer-python` (Qt5 GUI tool, last updated ~2020-2021) with modern CLI workflow.
 
+## Usage
+
+### Generate Video
+```bash
+./visualizer <input.wav> <output.mp4>
+```
+
+### Generate Snapshot (for quick visual testing)
+```bash
+./visualizer --snapshot --at=10.0 <input.wav> <output.png>
+```
+
+Options:
+- `--snapshot`: Generate a single PNG frame instead of full video
+- `--at=<seconds>`: Timestamp for snapshot (default: 1.0)
+
 ## Current Status: Production Ready ✅
 
 **Performance: ~9x realtime speed**
@@ -17,13 +33,14 @@ CLI audio visualizer written in Go that generates **discrete frequency bars** fo
 - **89x improvement** from initial 0.102x implementation
 
 **What Works:**
-- ✅ 64 discrete frequency bars (visually distinct, not continuous)
+- ✅ 64 discrete frequency bars with 4px gaps (visually distinct, not continuous)
 - ✅ Symmetric mirroring (bars above and below center)
 - ✅ Brand red color RGB(164,0,0) applied
 - ✅ FFT-based analysis (2048-point, Hanning window, log scale)
-- ✅ Proper bar spacing and layout
+- ✅ Proper bar spacing and layout (16px bars + 4px gaps)
 - ✅ Production-ready performance
 - ✅ Smoothing/decay animation (fast rise 0.8, slow decay 0.92)
+- ✅ Snapshot mode for rapid visual iteration
 
 **Performance Profile:**
 - Frame drawing: 48.6% (optimized with buffer reuse, copy operations)
@@ -34,7 +51,7 @@ CLI audio visualizer written in Go that generates **discrete frequency bars** fo
 ## Specification (Target)
 
 ### Visual Requirements
-- **63 discrete bars** (currently 64) - each ~20px wide
+- **63 discrete bars** (currently 64 with 4px gaps) - each 16px wide
 - **Symmetric mirroring** - bars reflected above/below center ✅
 - **Resolution:** 1280×720 @ 30fps ✅
 - **Colors:** RGB(164,0,0) red bars ✅, RGB(254,184,30) yellow text (TODO)
