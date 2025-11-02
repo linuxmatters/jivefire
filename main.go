@@ -169,9 +169,12 @@ func main() {
 			}
 		}
 
+		// Rearrange frequencies for center-out symmetric distribution
+		rearrangedHeights := rearrangeFrequenciesCenterOut(prevBarHeights)
+
 		// Generate frame image
 		t0 = time.Now()
-		drawFrame(prevBarHeights, img, barRow)
+		drawFrame(rearrangedHeights, img, barRow)
 		totalDraw += time.Since(t0)
 
 		// Write raw RGB to FFmpeg
@@ -281,6 +284,29 @@ func binFFT(coeffs []complex128) []float64 {
 	}
 
 	return barHeights
+}
+
+func rearrangeFrequenciesCenterOut(barHeights []float64) []float64 {
+	// Rearrange bars so most active frequencies (low indices) are in the center
+	// and less active frequencies (high indices) are on the outer edges
+	// Input:  [0, 1, 2, 3, 4, 5, ...] (left to right, low to high freq)
+	// Output: [3, 1, 0, 2, 4, 5, ...] (center to edges, creating symmetry)
+	
+	rearranged := make([]float64, len(barHeights))
+	center := len(barHeights) / 2
+	
+	for i := 0; i < len(barHeights); i++ {
+		// Place bars alternating left and right from center
+		if i%2 == 0 {
+			// Even indices go to right of center
+			rearranged[center+i/2] = barHeights[i]
+		} else {
+			// Odd indices go to left of center
+			rearranged[center-1-i/2] = barHeights[i]
+		}
+	}
+	
+	return rearranged
 }
 
 func drawFrame(barHeights []float64, img *image.RGBA, barRow []byte) {
@@ -399,8 +425,11 @@ func generateSnapshot(samples []float64, outputFile string, atTime float64) {
 		barRow[i+3] = 255
 	}
 
+	// Rearrange frequencies for center-out symmetric distribution
+	rearrangedHeights := rearrangeFrequenciesCenterOut(barHeights)
+
 	// Draw frame
-	drawFrame(barHeights, img, barRow)
+	drawFrame(rearrangedHeights, img, barRow)
 
 	// Save as PNG
 	f, err := os.Create(outputFile)
