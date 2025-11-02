@@ -27,10 +27,11 @@ const (
 	fftSize    = 2048
 
 	// Visualization settings
-	numBars   = 64  // Close to 63, power of 2 for simplicity
-	barWidth  = 16  // Width of each bar
-	barGap    = 4   // Gap between bars
-	centerGap = 100 // Gap between top and bottom bar sections
+	numBars      = 64   // Close to 63, power of 2 for simplicity
+	barWidth     = 16   // Width of each bar
+	barGap       = 4    // Gap between bars
+	centerGap    = 100  // Gap between top and bottom bar sections
+	maxBarHeight = 0.65 // Maximum bar height as fraction of available space (0.8 = 80%)
 
 	// Colors
 	barColorR = 164
@@ -277,9 +278,12 @@ func binFFT(coeffs []complex128) []float64 {
 	}
 
 	if maxVal > 0 {
+		// Calculate max height with cap applied
+		availableHeight := float64(height/2) * maxBarHeight
+
 		for i := range barHeights {
-			// Log scale and normalize
-			barHeights[i] = math.Log10(1+barHeights[i]*9/maxVal) * float64(height/2)
+			// Log scale and normalize with height cap
+			barHeights[i] = math.Log10(1+barHeights[i]*9/maxVal) * availableHeight
 		}
 	}
 
@@ -291,10 +295,10 @@ func rearrangeFrequenciesCenterOut(barHeights []float64) []float64 {
 	// and less active frequencies (high indices) are on the outer edges
 	// Input:  [0, 1, 2, 3, 4, 5, ...] (left to right, low to high freq)
 	// Output: [3, 1, 0, 2, 4, 5, ...] (center to edges, creating symmetry)
-	
+
 	rearranged := make([]float64, len(barHeights))
 	center := len(barHeights) / 2
-	
+
 	for i := 0; i < len(barHeights); i++ {
 		// Place bars alternating left and right from center
 		if i%2 == 0 {
@@ -305,7 +309,7 @@ func rearrangeFrequenciesCenterOut(barHeights []float64) []float64 {
 			rearranged[center-1-i/2] = barHeights[i]
 		}
 	}
-	
+
 	return rearranged
 }
 
