@@ -127,8 +127,28 @@ func main() {
 		barRow[i+3] = 255
 	}
 
+	// CAVA algorithm implementation
 	// Smoothing: track previous bar heights for temporal smoothing
 	prevBarHeights := make([]float64, numBars)
+	cavaPeaks := make([]float64, numBars)
+	cavaFall := make([]float64, numBars)
+	cavaMem := make([]float64, numBars)
+
+	// CAVA defaults (from karlstav/cava source)
+	const framerate = 30.0
+	const noiseReduction = 0.77 // CAVA default integral smoothing
+	const fallAccel = 0.028     // CAVA gravity acceleration constant
+
+	// Calculate gravity modifier (CAVA formula)
+	gravityMod := math.Pow(60.0/framerate, 2.5) * 1.54 / noiseReduction
+	if gravityMod < 1.0 {
+		gravityMod = 1.0
+	}
+
+	// Auto-sensitivity adjustment (CAVA-style)
+	// Track running average of peak values to prevent constant topping out
+	var sensitivity = 1.0
+	const sensitivityAlpha = 0.05 // Faster adaptation for better control
 
 	for frame := 0; frame < numFrames; frame++ {
 		start := frame * samplesPerFrame
@@ -156,18 +176,77 @@ func main() {
 
 		// Compute magnitudes and bin into bars
 		t0 = time.Now()
-		barHeights := binFFT(coeffs)
+		barHeights := binFFT(coeffs, sensitivity)
 		totalBin += time.Since(t0)
 
-		// Apply smoothing: balanced response - smooth but still connected to audio
-		for i := range barHeights {
-			if barHeights[i] > prevBarHeights[i] {
-				// Rising: blend 60% new, 40% old (fairly responsive rise)
-				prevBarHeights[i] = barHeights[i]*0.6 + prevBarHeights[i]*0.4
-			} else {
-				// Falling: blend 5% new, 95% old (smooth decay but not too slow)
-				prevBarHeights[i] = barHeights[i]*0.05 + prevBarHeights[i]*0.95
+		// Update auto-sensitivity based on peak activity
+		// Count how many bars are near/at the ceiling to prevent topping out
+		availableHeight := float64(height/2) * maxBarHeight
+		targetPeak := availableHeight * 0.70          // Target 70% to leave 30% headroom
+		toppingOutThreshold := availableHeight * 0.95 // Consider "topped out" at 95%
+
+		toppedOutCount := 0
+		var peakSum float64
+		for _, h := range barHeights {
+			if h > toppingOutThreshold {
+				toppedOutCount++
 			}
+			if h > targetPeak {
+				peakSum += h
+			}
+		}
+
+		// If more than 10% of bars are topping out, aggressively reduce sensitivity
+		if toppedOutCount > numBars/10 {
+			sensitivity *= 0.90 // Fast reduction
+		} else if peakSum > targetPeak*float64(numBars)*0.2 {
+			// Multiple bars exceeding target, reduce sensitivity
+			sensitivity *= 1.0 - sensitivityAlpha
+		} else {
+			// Bars too low, increase sensitivity slowly
+			maxBar := 0.0
+			for _, h := range barHeights {
+				if h > maxBar {
+					maxBar = h
+				}
+			}
+			if maxBar < targetPeak*0.5 {
+				sensitivity *= 1.0 + sensitivityAlpha
+			}
+		}
+
+		// Clamp sensitivity to reasonable range
+		if sensitivity < 0.05 {
+			sensitivity = 0.05
+		}
+		if sensitivity > 2.0 {
+			sensitivity = 2.0
+		}
+
+		// Apply CAVA-style gravity smoothing: responsive to changes
+		for i := range barHeights {
+			currentHeight := barHeights[i]
+
+			// CAVA gravity-based decay
+			if currentHeight < prevBarHeights[i] {
+				// Falling: apply gravity with quadratic acceleration
+				currentHeight = cavaPeaks[i] * (1.0 - (cavaFall[i] * cavaFall[i] * gravityMod))
+				cavaFall[i] += fallAccel
+
+				// Floor at zero
+				if currentHeight < 0 {
+					currentHeight = 0
+				}
+			} else {
+				// Rising: new peak
+				cavaPeaks[i] = currentHeight
+				cavaFall[i] = 0.0
+			}
+
+			// CAVA integral smoothing (noise reduction)
+			currentHeight = cavaMem[i]*noiseReduction + currentHeight
+			cavaMem[i] = currentHeight
+			prevBarHeights[i] = currentHeight
 		}
 
 		// Rearrange frequencies for center-out symmetric distribution
@@ -245,7 +324,7 @@ func applyHanning(data []float64) []float64 {
 	return windowed
 }
 
-func binFFT(coeffs []complex128) []float64 {
+func binFFT(coeffs []complex128, sensitivity float64) []float64 {
 	// Use only first half (positive frequencies)
 	halfSize := len(coeffs) / 2
 
@@ -274,28 +353,27 @@ func binFFT(coeffs []complex128) []float64 {
 		barHeights[bar] = sum / float64(binsPerBar)
 	}
 
-	// Normalize and apply log scale with noise gate
-	maxVal := 0.0
-	for _, h := range barHeights {
-		if h > maxVal {
-			maxVal = h
-		}
-	}
+	// CAVA-style processing: apply sensitivity to RAW values, then convert to height
+	// NO per-frame normalization!
+	availableHeight := float64(height/2) * maxBarHeight
 
-	if maxVal > 0 {
-		// Calculate max height with cap applied
-		availableHeight := float64(height/2) * maxBarHeight
+	// Apply fixed scale factor (tune this based on your audio levels)
+	const baseScale = 0.0075 // Increased from 0.001 for better visibility
 
-		// Noise gate threshold (17.5% of max) - aggressively suppress quiet sounds
-		noiseThreshold := maxVal * 0.175
+	for i := range barHeights {
+		// Apply sensitivity to raw magnitude
+		scaled := barHeights[i] * baseScale * sensitivity
 
-		for i := range barHeights {
-			// Apply noise gate first
-			if barHeights[i] < noiseThreshold {
-				barHeights[i] = 0
-			} else {
-				// Log scale and normalize with height cap
-				barHeights[i] = math.Log10(1+barHeights[i]*9/maxVal) * availableHeight
+		// Noise gate on raw values (before log scale)
+		if scaled < 0.01 {
+			barHeights[i] = 0
+		} else {
+			// Log scale for better visual distribution
+			barHeights[i] = math.Log10(1+scaled*9) * availableHeight
+
+			// Clip at available height (CAVA clips at 1.0, we clip at pixel height)
+			if barHeights[i] > availableHeight {
+				barHeights[i] = availableHeight
 			}
 		}
 	}
@@ -425,8 +503,8 @@ func generateSnapshot(samples []float64, outputFile string, atTime float64) {
 	fft := fourier.NewFFT(fftSize)
 	coeffs := fft.Coefficients(nil, windowed)
 
-	// Compute magnitudes and bin into bars
-	barHeights := binFFT(coeffs)
+	// Compute magnitudes and bin into bars (sensitivity=1.0 for snapshot)
+	barHeights := binFFT(coeffs, 1.0)
 
 	// Create image
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
