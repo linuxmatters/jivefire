@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"image/png"
+	"io"
 	"math"
 	"os"
 	"os/exec"
@@ -56,25 +57,43 @@ func main() {
 
 	_ = ctx // Kong context available for future use
 
-	fmt.Printf("Reading audio: %s\n", inputFile)
-	samples, err := audio.ReadWAV(inputFile)
-	if err != nil {
-		fmt.Printf("Error reading WAV: %v\n", err)
-		os.Exit(1)
-	}
-
-	fmt.Printf("Loaded %d samples\n", len(samples))
-
 	if snapshotMode {
+		// Snapshot mode: use old single-pass approach for simplicity
+		fmt.Printf("Reading audio: %s\n", inputFile)
+		samples, err := audio.ReadWAV(inputFile)
+		if err != nil {
+			fmt.Printf("Error reading WAV: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Loaded %d samples\n", len(samples))
+		
 		generateSnapshot(samples, outputFile, snapshotTime)
 		return
 	}
 
-	generateVideo(samples, inputFile, outputFile)
+	// Video mode: use 2-pass streaming approach
+	generateVideo(inputFile, outputFile)
 }
 
-func generateVideo(samples []float64, inputFile string, outputFile string) {
-	fmt.Printf("Generating visualization...\n")
+func generateVideo(inputFile string, outputFile string) {
+	// ============================================================================
+	// PASS 1: Analyze audio to calculate optimal parameters
+	// ============================================================================
+	profile, err := audio.AnalyzeAudio(inputFile)
+	if err != nil {
+		fmt.Printf("Error analyzing audio: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("\nPass 2: Rendering video...\n")
+
+	// Open streaming reader for Pass 2
+	reader, err := audio.NewStreamingReader(inputFile)
+	if err != nil {
+		fmt.Printf("Error opening audio stream: %v\n", err)
+		os.Exit(1)
+	}
+	defer reader.Close()
 
 	// Start FFmpeg process with optimized settings
 	cmd := exec.Command("ffmpeg",
@@ -128,9 +147,8 @@ func generateVideo(samples []float64, inputFile string, outputFile string) {
 	processor := audio.NewProcessor()
 	frame := renderer.NewFrame(bgImage, fontFace)
 
-	// Calculate frames
-	samplesPerFrame := config.SampleRate / config.FPS
-	numFrames := len(samples) / samplesPerFrame
+	// Calculate frames from profile
+	numFrames := profile.NumFrames
 
 	// Profiling variables
 	var totalFFT, totalBin, totalDraw, totalWrite time.Duration
@@ -151,27 +169,25 @@ func generateVideo(samples []float64, inputFile string, outputFile string) {
 	// Auto-sensitivity adjustment (CAVA-style)
 	sensitivity := 1.0
 
-	// TODO Phase 4: Replace with profile.OptimalBaseScale from Pass 1 analysis
-	const baseScale = 0.0075 // Temporary: will be replaced with calculated value
-
 	for frameNum := 0; frameNum < numFrames; frameNum++ {
-		start := frameNum * samplesPerFrame
-		end := start + config.FFTSize
-		if end > len(samples) {
-			end = len(samples)
+		// Read next chunk from streaming reader
+		chunk, err := reader.ReadChunk(config.FFTSize)
+		if err == io.EOF {
+			break // End of audio
 		}
-
-		// Get FFT of this chunk
-		chunk := samples[start:end]
+		if err != nil {
+			fmt.Printf("\nError reading audio chunk: %v\n", err)
+			break
+		}
 
 		// Compute FFT
 		t0 := time.Now()
 		coeffs := processor.ProcessChunk(chunk)
 		totalFFT += time.Since(t0)
 
-		// Compute magnitudes and bin into bars
+		// Compute magnitudes and bin into bars using optimal baseScale from Pass 1
 		t0 = time.Now()
-		barHeights := audio.BinFFT(coeffs, sensitivity, baseScale)
+		barHeights := audio.BinFFT(coeffs, sensitivity, profile.OptimalBaseScale)
 		totalBin += time.Since(t0)
 
 		// CAVA-style auto-sensitivity with soft knee compression
@@ -274,7 +290,7 @@ func generateVideo(samples []float64, inputFile string, outputFile string) {
 	fmt.Printf("  Frame drawing:     %v (%.1f%%)\n", totalDraw, float64(totalDraw)/float64(totalTime)*100)
 	fmt.Printf("  FFmpeg writing:    %v (%.1f%%)\n", totalWrite, float64(totalWrite)/float64(totalTime)*100)
 	fmt.Printf("  Total time:        %v\n", totalTime)
-	fmt.Printf("  Speed:             %.2fx realtime\n", float64(len(samples))/float64(config.SampleRate)/totalTime.Seconds())
+	fmt.Printf("  Speed:             %.2fx realtime\n", profile.Duration/totalTime.Seconds())
 
 	fmt.Printf("\nDone! Output: %s\n", outputFile)
 }
