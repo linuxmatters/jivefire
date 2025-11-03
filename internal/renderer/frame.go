@@ -19,9 +19,8 @@ type Frame struct {
 
 	// Pre-computed values
 	maxBarHeight  int
-	alphaTable    []uint8     // Pre-computed alpha values for gradient
-	barColorTable [][3]uint8  // Pre-computed bar colors at different alpha levels
-	textOverlay   *image.RGBA // Pre-rendered text overlay
+	alphaTable    []uint8    // Pre-computed alpha values for gradient
+	barColorTable [][3]uint8 // Pre-computed bar colors at different alpha levels
 	hasBackground bool
 }
 
@@ -99,8 +98,8 @@ func (f *Frame) Draw(barHeights []float64) {
 		f.drawBarsNoBackground(barHeights) // Much faster path for black background
 	}
 
-	// Apply pre-rendered text overlay
-	if f.textOverlay != nil {
+	// Apply text overlay
+	if f.fontFace != nil {
 		f.applyTextOverlay()
 	}
 }
