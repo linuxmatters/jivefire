@@ -22,11 +22,11 @@ Get a preview image.
 
 ## What You Get
 
-✅ **64 discrete frequency bars**
-✅ **Symmetric mirroring**
-✅ **1280×720 @ 30fps** H.264 MP4
-✅ **FFT-based** (2048-point, Hanning window, log scale)
-✅ **Smooth decay**
+- **64 discrete frequency bars**
+- **Symmetric mirroring**
+- **1280×720 @ 30fps** H.264 MP4
+- **FFT-based** (2048-point, Hanning window, log scale)
+- **Smooth decay**
 
 ## Build
 
