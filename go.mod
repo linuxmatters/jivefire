@@ -1,4 +1,4 @@
-module github.com/linuxmatters/visualizer-go
+module github.com/linuxmatters/jivefire
 
 go 1.24.0
 

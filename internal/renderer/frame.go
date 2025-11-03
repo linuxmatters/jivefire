@@ -4,7 +4,7 @@ import (
 	"image"
 	"io"
 
-	"github.com/linuxmatters/visualizer-go/internal/config"
+	"github.com/linuxmatters/jivefire/internal/config"
 	"golang.org/x/image/font"
 )
 

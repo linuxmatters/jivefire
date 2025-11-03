@@ -1,16 +1,21 @@
-# Project Reorganization Summary
+# Jivefire - Project Reorganisatio   - Audio processing is isolated in `internal/audio/`
+   - Rendering logic is isolated in `internal/renderer/`
+   - Configuration is centralised in `internal/config/`
+   - CLI orchestration is in `cmd/jivefire/`mmary
+
+> Spin your podcast .wav into a groovy MP4 visualiser. Cava-inspired audio frequencies dancing in real-time.
 
 ## What Changed
 
-The project has been reorganized from a single `main.go` file into an idiomatic Go project structure following community best practices.
+The project has been reorganised from a single `main.go` file into an idiomatic Go project structure following community best practices.
 
 ## New Structure
 
 ```
-visualizer-go/
-├── cmd/visualizer/          # Application entry point
-│   └── main.go             # CLI, orchestration, and main loop
-├── internal/               # Private application packages
+jivefire/
+├── cmd/jivefire/          # Application entry point
+│   └── main.go            # CLI, orchestration, and main loop
+├── internal/              # Private application packages
 │   ├── audio/             # Audio processing
 │   │   ├── reader.go      # WAV file reading
 │   │   └── fft.go         # FFT analysis, binning, smoothing
@@ -71,7 +76,7 @@ visualizer-go/
 - `DrawCenterText()` / `DrawEpisodeNumber()` - Text overlays
 - `WriteRawRGB()` - Output raw RGB24 to FFmpeg
 
-### `cmd/visualizer`
+### `cmd/jivefire`
 - CLI flag parsing
 - Main video generation loop with CAVA algorithm
 - Snapshot generation mode
@@ -88,14 +93,14 @@ just video                                    # Full render → testdata/test.mp
 just run testdata/dream.wav output.mp4       # Custom input/output
 
 # Manual build
-go build -o visualizer ./cmd/visualizer
+go build -o jivefire ./cmd/jivefire
 
 # Run
-./visualizer testdata/dream.wav output.mp4
+./jivefire testdata/dream.wav output.mp4
 
 # Snapshot mode (new consolidated syntax)
-./visualizer --snapshot=5.0 testdata/dream.wav frame.png
-./visualizer -s 5.0 testdata/dream.wav frame.png  # Short form
+./jivefire --snapshot=5.0 testdata/dream.wav frame.png
+./jivefire -s 5.0 testdata/dream.wav frame.png  # Short form
 ```
 
 ## CLI Argument Handling
@@ -143,7 +148,7 @@ var CLI struct {
 
 ## Verification
 
-✅ Build succeeds: `go build -o visualizer ./cmd/visualizer`
-✅ Snapshot mode works: `./visualizer --snapshot --at=5.0 testdata/dream.wav test.png`
+✅ Build succeeds: `go build -o jivefire ./cmd/jivefire`
+✅ Snapshot mode works: `./jivefire --snapshot=5.0 testdata/dream.wav test.png`
 ✅ All functionality preserved from original implementation
 ✅ No changes to algorithm or performance characteristics

@@ -3,7 +3,7 @@ package audio
 import (
 	"math"
 
-	"github.com/linuxmatters/visualizer-go/internal/config"
+	"github.com/linuxmatters/jivefire/internal/config"
 	"gonum.org/v1/gonum/dsp/fourier"
 )
 

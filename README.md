@@ -1,10 +1,14 @@
-# Audio Visualizer (Go)
+# Jivefire
 
-CLI audio visualizer written in Go that generates **discrete frequency bars** for podcast video production.
+[![Version](https://img.shields.io/badge/version-0.0.1-blue.svg)](https://github.com/linuxmatters/jivefire/releases)
+
+> Spin your podcast .wav into a groovy MP4 visualiser. Cava-inspired audio frequencies dancing in real-time.
+
+CLI audio visualiser written in Go that generates **discrete frequency bars** for podcast video production.
 
 ## Project Context
 
-**Problem:** FFmpeg's audio visualization filters (`showfreqs`, `showspectrum`) render **continuous frequency spectra**, not discrete bars. After extensive testing and research (including official FFmpeg 7.1.1 documentation), confirmed that pure FFmpeg cannot achieve discrete 63-bar visualization required for Linux Matters podcast branding.
+**Problem:** FFmpeg's audio visualisation filters (`showfreqs`, `showspectrum`) render **continuous frequency spectra**, not discrete bars. After extensive testing and research (including official FFmpeg 7.1.1 documentation), confirmed that pure FFmpeg cannot achieve discrete 63-bar visualisation required for Linux Matters podcast branding.
 
 **Solution:** Go implementation that performs FFT analysis, bins frequencies into discrete bars, generates frames, and pipes to FFmpeg for encoding. This hybrid approach achieves the discrete bar aesthetic while avoiding Python dependency hell.
 
@@ -14,14 +18,14 @@ CLI audio visualizer written in Go that generates **discrete frequency bars** fo
 
 ### Generate Video
 ```bash
-./visualizer <input.wav> <output.mp4>
+./jivefire <input.wav> <output.mp4>
 ```
 
 ### Generate Snapshot (for quick visual testing)
 ```bash
-./visualizer --snapshot=10.0 <input.wav> <output.png>
+./jivefire --snapshot=10.0 <input.wav> <output.png>
 # Or use short form:
-./visualizer -s 10.0 <input.wav> <output.png>
+./jivefire -s 10.0 <input.wav> <output.png>
 ```
 
 Options:
@@ -35,8 +39,8 @@ Options:
 
 **What Works:**
 - ✅ 64 discrete frequency bars with 4px gaps (visually distinct, not continuous)
-- ✅ Symmetric mirroring (bars above and below center)
-- ✅ Brand red color RGB(164,0,0) applied
+- ✅ Symmetric mirroring (bars above and below centre)
+- ✅ Brand red colour RGB(164,0,0) applied
 - ✅ FFT-based analysis (2048-point, Hanning window, log scale)
 - ✅ Proper bar spacing and layout (16px bars + 4px gaps)
 - ✅ Production-ready performance
@@ -44,7 +48,7 @@ Options:
 - ✅ Snapshot mode for rapid visual iteration
 
 **Performance Profile:**
-- Frame drawing: 48.6% (optimized with buffer reuse, copy operations)
+- Frame drawing: 48.6% (optimised with buffer reuse, copy operations)
 - FFmpeg encoding: 45.8% (ultrafast preset, pipe overhead)
 - FFT computation: 1.3% (negligible)
 - Bar binning: 0.1% (negligible)
@@ -86,19 +90,19 @@ Go: FFT Analysis per frame (gonum fourier)
 Go: Generate RGB24 frames (image/draw)
     ├─ Draw 64 bars with calculated heights
     ├─ Apply symmetric mirroring
-    └─ Direct pixel buffer writes (optimized)
+    └─ Direct pixel buffer writes (optimised)
     ↓
 Go: Pipe raw frames to FFmpeg stdin
     ↓
 FFmpeg: Encode video + mux audio
-    └─ Output: MP4 with discrete bar visualization
+    └─ Output: MP4 with discrete bar visualisation
 ```
 
-## Performance Optimizations
+## Performance Optimisations
 
 **Implemented:**
 - ✅ Direct pixel buffer writes (`img.Pix[]`) instead of `img.Set()` - ~100x faster
-- ✅ Optimized FFmpeg RGB24 pipe with row buffering - eliminated per-pixel overhead
+- ✅ Optimised FFmpeg RGB24 pipe with row buffering - eliminated per-pixel overhead
 - ✅ Image buffer reuse across frames - eliminated repeated allocations
 - ✅ Pre-computed bar pixel row with copy operations - eliminated nested loops
 - ✅ FFmpeg preset `ultrafast` for faster encoding
@@ -123,7 +127,7 @@ FFmpeg: Encode video + mux audio
 ### Using Just (Recommended)
 
 ```bash
-just build              # Build the visualizer binary
+just build              # Build the jivefire binary
 just snapshot           # Generate snapshot at 10s mark → testdata/snapshot.png
 just video              # Render testdata/dream.wav → testdata/test.mp4
 just clean              # Remove build artifacts
@@ -133,7 +137,7 @@ just clean              # Remove build artifacts
 
 ```bash
 go mod tidy
-go build -o visualizer ./cmd/visualizer
+go build -o jivefire ./cmd/jivefire
 ```
 
 ## Project Structure
@@ -165,7 +169,7 @@ go build -o visualizer ./cmd/visualizer
 ```
 
 The project follows standard Go conventions:
-- `cmd/visualizer/` - Application entry point and CLI orchestration
+- `cmd/jivefire/` - Application entry point and CLI orchestration
 - `internal/` - Private packages that cannot be imported by external projects
 - `assets/` - Static resources (fonts, backgrounds)
 - `testdata/` - Test files (following Go testing conventions)
@@ -173,12 +177,12 @@ The project follows standard Go conventions:
 ## Usage
 
 ```bash
-./visualizer testdata/dream.wav output.mp4
+./jivefire testdata/dream.wav output.mp4
 ```
 
 **Example:**
 ```bash
-./visualizer testdata/dream.wav test-go-bars.mp4
+./jivefire testdata/dream.wav test-go-bars.mp4
 ```
 
 ## Implementation Details
@@ -195,9 +199,9 @@ The codebase is organized into distinct packages following Go best practices:
 
 **`internal/renderer`** - Frame rendering pipeline:
 - `assets.go` - Asset loading (fonts, background images)
-- `frame.go` - Bar visualization and text overlay rendering
+- `frame.go` - Bar visualisation and text overlay rendering
 
-**`cmd/visualizer`** - Main application entry point and CLI orchestration
+**`cmd/jivefire`** - Main application entry point and CLI orchestration
 
 ### Dependencies
 - `gonum.org/v1/gonum/dsp/fourier` - FFT computation
@@ -230,8 +234,8 @@ barColorB  = 0       // Blue component
 
 ### Phase 1: Performance (CURRENT PRIORITY)
 - [ ] **Profile bottlenecks** - identify if frame gen or FFmpeg is slow
-- [ ] **Optimize frame generation** - parallel processing, buffer pooling
-- [ ] **Optimize FFmpeg pipeline** - thread settings, buffer sizes
+- [ ] **Optimise frame generation** - parallel processing, buffer pooling
+- [ ] **Optimise FFmpeg pipeline** - thread settings, buffer sizes
 - [ ] **Target:** Achieve 1x speed or better (real-time encoding)
 
 ### Phase 2: Feature Parity
@@ -239,7 +243,7 @@ barColorB  = 0       // Blue component
 - [ ] Exactly 63 bars (change `numBars = 63`)
 - [ ] Text overlay for episode title (Go drawing or FFmpeg filter)
 - [ ] Background image support (static PNG/JPG)
-- [ ] Configurable colors via command-line flags
+- [ ] Configurable colours via command-line flags
 
 ### Phase 3: Production Ready
 - [ ] Command-line argument parsing (flags for all options)
@@ -258,7 +262,7 @@ barColorB  = 0       // Blue component
 ## Research Summary
 
 **FFmpeg Limitations Confirmed:**
-- Official FFmpeg 7.1.1 documentation analyzed (2 Nov 2025)
+- Official FFmpeg 7.1.1 documentation analysed (2 Nov 2025)
 - `showfreqs` Section 19.24: `mode=bar` only changes rendering style
 - No parameters for discrete frequency binning (`bins`, `bar_count`, etc.)
 - All audio→video filters render continuous spectra, not grouped bars
@@ -268,7 +272,7 @@ barColorB  = 0       // Blue component
 **Why This Approach Works:**
 - Python tool (original) uses NumPy FFT → manual 63-bin grouping → Pillow draws 63 rectangles
 - Go tool replicates same logic: FFT → bin grouping → draw discrete bars
-- FFmpeg is used only for encoding (what it does well), not visualization logic
+- FFmpeg is used only for encoding (what it does well), not visualisation logic
 
 ## Single Binary Distribution
 

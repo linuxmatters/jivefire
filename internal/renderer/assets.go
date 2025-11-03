@@ -9,7 +9,7 @@ import (
 
 	"github.com/golang/freetype"
 	"github.com/golang/freetype/truetype"
-	"github.com/linuxmatters/visualizer-go/internal/config"
+	"github.com/linuxmatters/jivefire/internal/config"
 	"golang.org/x/image/font"
 )
 
