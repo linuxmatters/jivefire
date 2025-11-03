@@ -151,6 +151,9 @@ func generateVideo(samples []float64, inputFile string, outputFile string) {
 	// Auto-sensitivity adjustment (CAVA-style)
 	sensitivity := 1.0
 
+	// TODO Phase 4: Replace with profile.OptimalBaseScale from Pass 1 analysis
+	const baseScale = 0.0075 // Temporary: will be replaced with calculated value
+
 	for frameNum := 0; frameNum < numFrames; frameNum++ {
 		start := frameNum * samplesPerFrame
 		end := start + config.FFTSize
@@ -168,7 +171,7 @@ func generateVideo(samples []float64, inputFile string, outputFile string) {
 
 		// Compute magnitudes and bin into bars
 		t0 = time.Now()
-		barHeights := audio.BinFFT(coeffs, sensitivity)
+		barHeights := audio.BinFFT(coeffs, sensitivity, baseScale)
 		totalBin += time.Since(t0)
 
 		// CAVA-style auto-sensitivity with soft knee compression
@@ -302,7 +305,9 @@ func generateSnapshot(samples []float64, outputFile string, atTime float64) {
 	coeffs := processor.ProcessChunk(chunk)
 
 	// Compute magnitudes and bin into bars
-	barHeights := audio.BinFFT(coeffs, 1.0)
+	// TODO Phase 4: Replace with profile.OptimalBaseScale from Pass 1 analysis
+	const baseScale = 0.0075 // Temporary: will be replaced with calculated value
+	barHeights := audio.BinFFT(coeffs, 1.0, baseScale)
 
 	// Load background image
 	bgImage, err := renderer.LoadBackgroundImage("assets/bg.png")

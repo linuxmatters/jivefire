@@ -20,7 +20,8 @@ func ApplyHanning(data []float64) []float64 {
 
 // BinFFT bins FFT coefficients into bars and returns normalized values (0.0-1.0)
 // CAVA-style approach: work in normalized space, apply maxBarHeight scaling later
-func BinFFT(coeffs []complex128, sensitivity float64) []float64 {
+// baseScale is calculated from Pass 1 analysis for optimal visualization
+func BinFFT(coeffs []complex128, sensitivity float64, baseScale float64) []float64 {
 	// Use only first half (positive frequencies)
 	halfSize := len(coeffs) / 2
 
@@ -50,8 +51,7 @@ func BinFFT(coeffs []complex128, sensitivity float64) []float64 {
 	}
 
 	// CAVA-style processing: apply sensitivity, then normalize to 0.0-1.0 range
-	// Apply fixed scale factor (tune this based on your audio levels)
-	const baseScale = 0.0075 // Base scaling for raw magnitudes
+	// baseScale provided from Pass 1 analysis: OptimalBaseScale = 0.85 / GlobalPeak
 
 	for i := range barHeights {
 		// Apply sensitivity to raw magnitude
