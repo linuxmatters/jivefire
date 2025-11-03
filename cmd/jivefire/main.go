@@ -17,9 +17,10 @@ import (
 const version = "0.0.1"
 
 var CLI struct {
-	Input    string   `arg:"" name:"input" help:"Input WAV file" type:"existingfile"`
-	Output   string   `arg:"" name:"output" help:"Output file (.mp4 for video, .png for snapshot)"`
+	Input    string   `arg:"" name:"input" help:"Input WAV file" type:"existingfile" optional:""`
+	Output   string   `arg:"" name:"output" help:"Output file (.mp4 for video, .png for snapshot)" optional:""`
 	Snapshot *float64 `help:"Generate snapshot at specified time (seconds) instead of full video" short:"s"`
+	Version  bool     `help:"Show version information" short:"v"`
 }
 
 func main() {
@@ -32,6 +33,18 @@ func main() {
 			Compact: true,
 		}),
 	)
+
+	// Handle version flag
+	if CLI.Version {
+		fmt.Printf("jivefire version %s\n", version)
+		os.Exit(0)
+	}
+
+	// Validate required arguments when not showing version
+	if CLI.Input == "" || CLI.Output == "" {
+		fmt.Fprintln(os.Stderr, "Error: <input> and <output> are required")
+		os.Exit(1)
+	}
 
 	inputFile := CLI.Input
 	outputFile := CLI.Output

@@ -28,8 +28,14 @@ CLI audio visualiser written in Go that generates **discrete frequency bars** fo
 ./jivefire -s 10.0 <input.wav> <output.png>
 ```
 
+### Check Version
+```bash
+./jivefire --version  # or -v
+```
+
 Options:
 - `--snapshot=<seconds>` (or `-s`): Generate a single PNG frame at specified timestamp instead of full video
+- `--version` (or `-v`): Show version information
 
 ## Current Status: Production Ready ✅
 

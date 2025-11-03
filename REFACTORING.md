@@ -101,6 +101,9 @@ go build -o jivefire ./cmd/jivefire
 # Snapshot mode (new consolidated syntax)
 ./jivefire --snapshot=5.0 testdata/dream.wav frame.png
 ./jivefire -s 5.0 testdata/dream.wav frame.png  # Short form
+
+# Check version
+./jivefire --version  # or -v
 ```
 
 ## CLI Argument Handling
@@ -109,9 +112,11 @@ The project uses **Kong** for declarative CLI argument parsing:
 
 ```go
 var CLI struct {
-    Input    string   `arg:"" name:"input" help:"Input WAV file" type:"existingfile"`
-    Output   string   `arg:"" name:"output" help:"Output file (.mp4 for video, .png for snapshot)"`
+    Input    string   `arg:"" optional:"" type:"existingfile"`
+    Output   string   `arg:"" optional:""`
     Snapshot *float64 `help:"Generate snapshot at specified time (seconds) instead of full video" short:"s"`
+    Version  bool     `help:"Show version information" short:"v"`
+}
 }
 ```
 
