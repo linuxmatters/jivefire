@@ -608,19 +608,53 @@ func drawFrame(barHeights []float64, img *image.RGBA, barRow []byte, bgImage *im
 			continue
 		}
 
-		// Draw bar upward from center (with gap/2 offset)
+		// Draw bar upward from center (with gap/2 offset) with subtle alpha gradient
 		for y := centerY - barHeight - centerGap/2; y < centerY-centerGap/2; y++ {
 			if y >= 0 && y < height {
+				// Calculate distance from center (0.0 at center, 1.0 at tip)
+				distanceFromCenter := float64(centerY-centerGap/2-y) / float64(barHeight)
+				// Gradient: 1.0 (full) at center to 0.5 (50%) at tip
+				alphaFactor := 1.0 - (distanceFromCenter * 0.5)
+
 				offset := y*img.Stride + x*4
-				copy(img.Pix[offset:offset+barWidth*4], barRow)
+				for px := 0; px < barWidth; px++ {
+					pixOffset := offset + px*4
+					// Get background color
+					bgR := img.Pix[pixOffset]
+					bgG := img.Pix[pixOffset+1]
+					bgB := img.Pix[pixOffset+2]
+
+					// Alpha blend: result = bar*alpha + bg*(1-alpha)
+					img.Pix[pixOffset] = uint8(float64(barColorR)*alphaFactor + float64(bgR)*(1.0-alphaFactor))
+					img.Pix[pixOffset+1] = uint8(float64(barColorG)*alphaFactor + float64(bgG)*(1.0-alphaFactor))
+					img.Pix[pixOffset+2] = uint8(float64(barColorB)*alphaFactor + float64(bgB)*(1.0-alphaFactor))
+					img.Pix[pixOffset+3] = 255
+				}
 			}
 		}
 
-		// Draw mirror bar downward from center (with gap/2 offset)
+		// Draw mirror bar downward from center (with gap/2 offset) with subtle alpha gradient
 		for y := centerY + centerGap/2; y < centerY+barHeight+centerGap/2; y++ {
 			if y >= 0 && y < height {
+				// Calculate distance from center (0.0 at center, 1.0 at tip)
+				distanceFromCenter := float64(y-(centerY+centerGap/2)) / float64(barHeight)
+				// Gradient: 1.0 (full) at center to 0.5 (50%) at tip
+				alphaFactor := 1.0 - (distanceFromCenter * 0.5)
+
 				offset := y*img.Stride + x*4
-				copy(img.Pix[offset:offset+barWidth*4], barRow)
+				for px := 0; px < barWidth; px++ {
+					pixOffset := offset + px*4
+					// Get background color
+					bgR := img.Pix[pixOffset]
+					bgG := img.Pix[pixOffset+1]
+					bgB := img.Pix[pixOffset+2]
+
+					// Alpha blend: result = bar*alpha + bg*(1-alpha)
+					img.Pix[pixOffset] = uint8(float64(barColorR)*alphaFactor + float64(bgR)*(1.0-alphaFactor))
+					img.Pix[pixOffset+1] = uint8(float64(barColorG)*alphaFactor + float64(bgG)*(1.0-alphaFactor))
+					img.Pix[pixOffset+2] = uint8(float64(barColorB)*alphaFactor + float64(bgB)*(1.0-alphaFactor))
+					img.Pix[pixOffset+3] = 255
+				}
 			}
 		}
 	}
