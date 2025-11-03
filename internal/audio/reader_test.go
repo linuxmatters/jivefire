@@ -1,5 +1,4 @@
 package audio
-package audio
 
 import (
 	"io"
