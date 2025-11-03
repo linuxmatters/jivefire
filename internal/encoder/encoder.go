@@ -115,6 +115,9 @@ func New(config Config) (*Encoder, error) {
 func (e *Encoder) Initialize() error {
 	var ret int
 
+	// Suppress FFmpeg log output to prevent interference with TUI
+	ffmpeg.AVLogSetLevel(ffmpeg.AVLogQuiet)
+
 	// Convert Go string to C string
 	outputPath := ffmpeg.ToCStr(e.config.OutputPath)
 	defer outputPath.Free()
@@ -286,8 +289,8 @@ func (e *Encoder) initializeAudio() error {
 	channels := e.audioDecoder.Channels()
 	sampleRate := e.audioDecoder.SampleRate()
 
-	// Log the decoder's output format
-	fmt.Printf("Audio input: format=%d, sample_rate=%dHz, channels=%d\n", sampleFmt, sampleRate, channels)
+	// Log the decoder's output format (commented out to avoid TUI interference)
+	// fmt.Printf("Audio input: format=%d, sample_rate=%dHz, channels=%d\n", sampleFmt, sampleRate, channels)
 
 	// Check if we support this sample format
 	supportedFormats := map[int32]string{

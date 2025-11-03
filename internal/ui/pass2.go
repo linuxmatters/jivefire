@@ -1,0 +1,354 @@
+package ui
+
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/charmbracelet/bubbles/progress"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+)
+
+// Pass2Progress represents progress updates from Pass 2 video rendering
+type Pass2Progress struct {
+	Frame       int
+	TotalFrames int
+	Elapsed     time.Duration
+	BarHeights  []float64
+	FileSize    int64   // Estimated current file size in bytes
+	Sensitivity float64 // Current sensitivity value
+}
+
+// Pass2Complete signals completion of Pass 2
+type Pass2Complete struct {
+	OutputFile       string
+	Duration         time.Duration
+	FileSize         int64
+	TotalFrames      int
+	FFTTime          time.Duration
+	BinTime          time.Duration
+	DrawTime         time.Duration
+	EncodeTime       time.Duration
+	TotalTime        time.Duration
+	SamplesProcessed int64
+}
+
+// quitTimerMsg2 is sent when it's time to quit after showing completion
+type quitTimerMsg2 struct{}
+
+// pass2Model implements the Bubbletea model for Pass 2
+type pass2Model struct {
+	progress        progress.Model
+	lastUpdate      Pass2Progress
+	complete        *Pass2Complete
+	startTime       time.Time
+	completionTime  time.Time
+	width           int
+	height          int
+	minDisplayTime  time.Duration // Minimum time to show UI
+	completionDelay time.Duration // Time to show completion screen
+	quitting        bool          // Flag to indicate we're in quit delay
+}
+
+// NewPass2Model creates a new Pass 2 UI model
+func NewPass2Model() tea.Model {
+	p := progress.New(
+		progress.WithDefaultGradient(),
+		progress.WithWidth(60),
+	)
+
+	return &pass2Model{
+		progress:        p,
+		startTime:       time.Now(),
+		minDisplayTime:  500 * time.Millisecond, // Show UI for at least 0.5 seconds
+		completionDelay: 2 * time.Second,        // Show completion for 2 seconds
+		quitting:        false,
+	}
+}
+
+// Init initializes the model
+func (m *pass2Model) Init() tea.Cmd {
+	return nil
+}
+
+// Update handles messages
+func (m *pass2Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		m.progress.Width = min(msg.Width-20, 80)
+		return m, nil
+
+	case Pass2Progress:
+		m.lastUpdate = msg
+		return m, nil
+
+	case Pass2Complete:
+		m.complete = &msg
+		m.completionTime = time.Now()
+		m.quitting = true
+
+		// Calculate how long to show completion screen
+		elapsed := m.completionTime.Sub(m.startTime)
+		delay := m.completionDelay
+
+		// If total time is less than minDisplayTime, extend completion delay
+		if elapsed < m.minDisplayTime {
+			additionalTime := m.minDisplayTime - elapsed
+			delay = m.completionDelay + additionalTime
+		}
+
+		// Show completion screen for calculated delay before quitting
+		return m, tea.Tick(delay, func(t time.Time) tea.Msg {
+			return quitTimerMsg2{}
+		})
+
+	case quitTimerMsg2:
+		// Timer expired, now we can quit
+		return m, tea.Quit
+
+	case tea.KeyMsg:
+		// Allow any key to skip the completion screen delay
+		if m.complete != nil {
+			return m, tea.Quit
+		}
+		if msg.String() == "ctrl+c" {
+			return m, tea.Quit
+		}
+	}
+
+	return m, nil
+}
+
+// View renders the UI
+func (m *pass2Model) View() string {
+	if m.complete != nil {
+		return m.renderComplete()
+	}
+
+	return m.renderProgress()
+}
+
+func (m *pass2Model) renderProgress() string {
+	var s strings.Builder
+
+	// Title
+	title := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#A40000")).
+		Render("Jivefire 🔥")
+
+	subtitle := lipgloss.NewStyle().
+		Faint(true).
+		Render("Pass 2: Rendering & Encoding")
+
+	s.WriteString(title)
+	s.WriteString("\n")
+	s.WriteString(subtitle)
+	s.WriteString("\n\n")
+
+	// Progress bar
+	if m.lastUpdate.TotalFrames > 0 {
+		percent := float64(m.lastUpdate.Frame) / float64(m.lastUpdate.TotalFrames)
+		s.WriteString(fmt.Sprintf("Progress: %s %d%% (%d/%d)\n\n",
+			m.progress.ViewAs(percent),
+			int(percent*100),
+			m.lastUpdate.Frame,
+			m.lastUpdate.TotalFrames))
+
+		// Timing information
+		elapsed := m.lastUpdate.Elapsed
+		if elapsed == 0 {
+			elapsed = time.Since(m.startTime)
+		}
+
+		// Calculate estimated total time and ETA
+		var estimatedTotal time.Duration
+		var eta time.Duration
+		var speed float64
+
+		if m.lastUpdate.Frame > 0 && percent > 0 {
+			estimatedTotal = time.Duration(float64(elapsed) / percent)
+			eta = estimatedTotal - elapsed
+
+			// Calculate speed as ratio of video duration to encoding time
+			// Assuming 30 fps
+			videoDuration := time.Duration(m.lastUpdate.TotalFrames) * time.Second / 30
+			if elapsed > 0 {
+				speed = float64(videoDuration) / float64(elapsed)
+			}
+		}
+
+		timingInfo := fmt.Sprintf("Time: %s / %s  │  Speed: %.1fx realtime  │  ETA: %s",
+			formatDuration(elapsed),
+			formatDuration(estimatedTotal),
+			speed,
+			formatDuration(eta))
+
+		s.WriteString(lipgloss.NewStyle().Faint(true).Render(timingInfo))
+		s.WriteString("\n\n")
+	}
+
+	// Live Visualization
+	if len(m.lastUpdate.BarHeights) > 0 {
+		s.WriteString(lipgloss.NewStyle().Faint(true).Render("Live Visualization:"))
+		s.WriteString("\n")
+
+		// Render spectrum (reuse from Pass 1)
+		spectrum := renderSpectrum(m.lastUpdate.BarHeights, min(m.width-4, 72))
+		s.WriteString(spectrum)
+		s.WriteString("\n")
+
+		// Mirror for stereo effect (even though it's mono)
+		s.WriteString(spectrum)
+		s.WriteString("\n\n")
+	}
+
+	// Bottom stats line
+	if m.lastUpdate.FileSize > 0 || m.lastUpdate.Sensitivity > 0 {
+		statsLine := fmt.Sprintf("File Size: %s  │  Sensitivity: %.2f  │  Frame: %d",
+			formatBytes(m.lastUpdate.FileSize),
+			m.lastUpdate.Sensitivity,
+			m.lastUpdate.Frame)
+		s.WriteString(lipgloss.NewStyle().Faint(true).Render(statsLine))
+		s.WriteString("\n")
+	}
+
+	return lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#A40000")).
+		Padding(1, 2).
+		Render(s.String())
+}
+
+func (m *pass2Model) renderComplete() string {
+	var s strings.Builder
+
+	title := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#4A9B4A")).
+		Render("✓ Encoding Complete!")
+
+	s.WriteString(title)
+	s.WriteString("\n\n")
+
+	// Output summary
+	s.WriteString(fmt.Sprintf("Output:   %s\n", m.complete.OutputFile))
+
+	// Calculate speed
+	videoDuration := time.Duration(m.complete.TotalFrames) * time.Second / 30
+	speed := float64(videoDuration) / float64(m.complete.Duration)
+
+	s.WriteString(fmt.Sprintf("Duration: %.1fs video in %.1fs (%.1fx realtime)\n",
+		videoDuration.Seconds(),
+		m.complete.Duration.Seconds(),
+		speed))
+
+	s.WriteString(fmt.Sprintf("Size:     %s\n\n", formatBytes(m.complete.FileSize)))
+
+	// Performance Breakdown
+	s.WriteString(lipgloss.NewStyle().Faint(true).Render("Performance Breakdown:"))
+	s.WriteString("\n")
+
+	totalMs := m.complete.TotalTime.Milliseconds()
+	if totalMs == 0 {
+		totalMs = 1 // Avoid division by zero
+	}
+
+	s.WriteString(fmt.Sprintf("  FFT computation:   %-5s  (%d%%)   %s\n",
+		formatDuration(m.complete.FFTTime),
+		int(float64(m.complete.FFTTime.Milliseconds())*100/float64(totalMs)),
+		makeSparkline(float64(m.complete.FFTTime.Milliseconds())/float64(totalMs), 30)))
+
+	s.WriteString(fmt.Sprintf("  Bar binning:       %-5s  (%d%%)   %s\n",
+		formatDuration(m.complete.BinTime),
+		int(float64(m.complete.BinTime.Milliseconds())*100/float64(totalMs)),
+		makeSparkline(float64(m.complete.BinTime.Milliseconds())/float64(totalMs), 30)))
+
+	s.WriteString(fmt.Sprintf("  Frame drawing:     %-5s  (%d%%)  %s\n",
+		formatDuration(m.complete.DrawTime),
+		int(float64(m.complete.DrawTime.Milliseconds())*100/float64(totalMs)),
+		makeSparkline(float64(m.complete.DrawTime.Milliseconds())/float64(totalMs), 30)))
+
+	s.WriteString(fmt.Sprintf("  Video encoding:    %-5s  (%d%%)  %s\n",
+		formatDuration(m.complete.EncodeTime),
+		int(float64(m.complete.EncodeTime.Milliseconds())*100/float64(totalMs)),
+		makeSparkline(float64(m.complete.EncodeTime.Milliseconds())/float64(totalMs), 30)))
+
+	s.WriteString(fmt.Sprintf("  Total time:        %s\n\n", formatDuration(m.complete.TotalTime)))
+
+	// Quality Metrics
+	s.WriteString(lipgloss.NewStyle().Faint(true).Render("Quality Metrics:"))
+	s.WriteString("\n")
+	s.WriteString(fmt.Sprintf("  Video: %d frames, %.2f fps average\n",
+		m.complete.TotalFrames,
+		float64(m.complete.TotalFrames)/videoDuration.Seconds()))
+
+	if m.complete.SamplesProcessed > 0 {
+		s.WriteString(fmt.Sprintf("  Audio: %d samples processed\n\n",
+			m.complete.SamplesProcessed))
+	}
+
+	processingTime := time.Since(m.startTime)
+	s.WriteString(fmt.Sprintf("Encoding completed in %.2fs", processingTime.Seconds()))
+
+	return lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#4A9B4A")).
+		Padding(1, 2).
+		Render(s.String()) + "\n"
+}
+
+// Helper functions
+
+func formatDuration(d time.Duration) string {
+	if d == 0 {
+		return "0s"
+	}
+	if d < time.Second {
+		return fmt.Sprintf("%dms", d.Milliseconds())
+	}
+	return fmt.Sprintf("%.1fs", d.Seconds())
+}
+
+func formatBytes(bytes int64) string {
+	if bytes == 0 {
+		return "0 B"
+	}
+
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+
+	units := []string{"KB", "MB", "GB"}
+	return fmt.Sprintf("%.1f %s", float64(bytes)/float64(div), units[exp])
+}
+
+func makeSparkline(ratio float64, width int) string {
+	blocks := []rune{'░', '▓', '█'}
+
+	filled := int(ratio * float64(width))
+	if filled > width {
+		filled = width
+	}
+
+	var result strings.Builder
+	for i := 0; i < width; i++ {
+		if i < filled {
+			result.WriteRune(blocks[2]) // Full block
+		} else {
+			result.WriteRune(blocks[0]) // Empty block
+		}
+	}
+
+	return result.String()
+}

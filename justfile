@@ -17,7 +17,6 @@ snapshot: build
 # Render full video from dream.wav to test.mp4
 video: build
     ./jivefire testdata/dream.wav testdata/test.mp4
-    @echo "✓ Video saved to testdata/test.mp4"
 
 # Clean build artifacts
 clean:
