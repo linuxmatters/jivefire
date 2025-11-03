@@ -36,7 +36,7 @@ const (
 	barWidth     = 12   // Width of each bar
 	barGap       = 8    // Gap between bars
 	centerGap    = 100  // Gap between top and bottom bar sections
-	maxBarHeight = 0.35 // Maximum bar height as fraction of available space
+	maxBarHeight = 0.50 // Maximum bar height as fraction of available space
 
 	// Colors
 	barColorR = 164
@@ -160,7 +160,6 @@ func main() {
 	// Auto-sensitivity adjustment (CAVA-style)
 	// Track running average of peak values to prevent constant topping out
 	var sensitivity = 1.0
-	const sensitivityAlpha = 0.05 // Faster adaptation for better control
 
 	for frame := 0; frame < numFrames; frame++ {
 		start := frame * samplesPerFrame
@@ -186,45 +185,31 @@ func main() {
 		coeffs := fft.Coefficients(nil, windowed)
 		totalFFT += time.Since(t0)
 
-		// Compute magnitudes and bin into bars
+		// Compute magnitudes and bin into bars (returns normalized 0.0-1.0 values)
 		t0 = time.Now()
 		barHeights := binFFT(coeffs, sensitivity)
 		totalBin += time.Since(t0)
 
-		// Update auto-sensitivity based on peak activity
-		// Count how many bars are near/at the ceiling to prevent topping out
-		availableHeight := float64(height/2) * maxBarHeight
-		targetPeak := availableHeight * 0.70          // Target 70% to leave 30% headroom
-		toppingOutThreshold := availableHeight * 0.95 // Consider "topped out" at 95%
+		// CAVA-style auto-sensitivity: work in normalized 0.0-1.0 space
+		// CAVA uses 1.0 as the hard limit - any value > 1.0 is considered overshoot
+		const overshootThreshold = 1.0 // CAVA clips at exactly 1.0
 
-		toppedOutCount := 0
-		var peakSum float64
-		for _, h := range barHeights {
-			if h > toppingOutThreshold {
-				toppedOutCount++
-			}
-			if h > targetPeak {
-				peakSum += h
+		overshootDetected := false
+		for i, h := range barHeights {
+			if h > overshootThreshold {
+				overshootDetected = true
+				// Clip to 1.0 immediately like CAVA does
+				barHeights[i] = 1.0
 			}
 		}
 
-		// If more than 10% of bars are topping out, aggressively reduce sensitivity
-		if toppedOutCount > numBars/10 {
-			sensitivity *= 0.90 // Fast reduction
-		} else if peakSum > targetPeak*float64(numBars)*0.2 {
-			// Multiple bars exceeding target, reduce sensitivity
-			sensitivity *= 1.0 - sensitivityAlpha
+		// CAVA-style sensitivity adjustment: asymmetric rates
+		if overshootDetected {
+			// Reduce sensitivity aggressively when overshooting
+			sensitivity *= 0.90 // 10% reduction per frame (much more aggressive than CAVA's 1.5%)
 		} else {
-			// Bars too low, increase sensitivity slowly
-			maxBar := 0.0
-			for _, h := range barHeights {
-				if h > maxBar {
-					maxBar = h
-				}
-			}
-			if maxBar < targetPeak*0.5 {
-				sensitivity *= 1.0 + sensitivityAlpha
-			}
+			// Increase sensitivity VERY slowly when undershooting (CAVA uses 1.002 = 0.2% increase)
+			sensitivity *= 1.001 // 0.1% increase per frame - slow climb back up
 		}
 
 		// Clamp sensitivity to reasonable range
@@ -233,6 +218,19 @@ func main() {
 		}
 		if sensitivity > 2.0 {
 			sensitivity = 2.0
+		}
+
+		// NOW apply maxBarHeight scaling to convert from normalized to pixel space
+		// Available space is from bar start (centerY ± centerGap/2) to edge (0 or height)
+		// This is: height/2 - centerGap/2 for each half
+		actualAvailableSpace := float64(height/2 - centerGap/2)
+		availableHeight := actualAvailableSpace * maxBarHeight
+		for i := range barHeights {
+			barHeights[i] *= availableHeight
+			// Hard clip at available height
+			if barHeights[i] > availableHeight {
+				barHeights[i] = availableHeight
+			}
 		}
 
 		// Apply CAVA-style gravity smoothing: responsive to changes
@@ -258,6 +256,20 @@ func main() {
 			// CAVA integral smoothing (noise reduction)
 			currentHeight = cavaMem[i]*noiseReduction + currentHeight
 			cavaMem[i] = currentHeight
+
+			// Soft knee compression instead of hard clip for smooth animation
+			// Apply progressive attenuation as bars approach maxBarHeight limit
+			// This creates a natural "squash" effect instead of abrupt clipping
+			if currentHeight > availableHeight {
+				// Soft knee: gradually compress values above limit
+				// Use exponential decay to smoothly approach the limit
+				overshoot := currentHeight - availableHeight
+				// Compress overshoot: the more it overshoots, the more we compress
+				// Formula: limit + overshoot * exp(-overshoot/limit)
+				// This asymptotically approaches the limit but never quite reaches it
+				currentHeight = availableHeight + overshoot*math.Exp(-overshoot/availableHeight)
+			}
+
 			prevBarHeights[i] = currentHeight
 		}
 
@@ -445,6 +457,8 @@ func applyHanning(data []float64) []float64 {
 	return windowed
 }
 
+// binFFT bins FFT coefficients into bars and returns NORMALIZED values (0.0-1.0)
+// CAVA-style approach: work in normalized space, apply maxBarHeight scaling later
 func binFFT(coeffs []complex128, sensitivity float64) []float64 {
 	// Use only first half (positive frequencies)
 	halfSize := len(coeffs) / 2
@@ -474,12 +488,9 @@ func binFFT(coeffs []complex128, sensitivity float64) []float64 {
 		barHeights[bar] = sum / float64(binsPerBar)
 	}
 
-	// CAVA-style processing: apply sensitivity to RAW values, then convert to height
-	// NO per-frame normalization!
-	availableHeight := float64(height/2) * maxBarHeight
-
+	// CAVA-style processing: apply sensitivity, then normalize to 0.0-1.0 range
 	// Apply fixed scale factor (tune this based on your audio levels)
-	const baseScale = 0.0075 // Increased from 0.001 for better visibility
+	const baseScale = 0.0075 // Base scaling for raw magnitudes
 
 	for i := range barHeights {
 		// Apply sensitivity to raw magnitude
@@ -489,13 +500,13 @@ func binFFT(coeffs []complex128, sensitivity float64) []float64 {
 		if scaled < 0.01 {
 			barHeights[i] = 0
 		} else {
-			// Log scale for better visual distribution
-			barHeights[i] = math.Log10(1+scaled*9) * availableHeight
+			// Log scale for better visual distribution, normalize to ~0.0-1.0
+			// Log10(1 + scaled*9) gives range [0, 1] for scaled in [0, 1]
+			// We scale up for better dynamic range
+			barHeights[i] = math.Log10(1 + scaled*9)
 
-			// Clip at available height (CAVA clips at 1.0, we clip at pixel height)
-			if barHeights[i] > availableHeight {
-				barHeights[i] = availableHeight
-			}
+			// DON'T clip here - let overshoot detection in main loop handle it
+			// This allows sensitivity adjustment to detect actual overshoots
 		}
 	}
 
