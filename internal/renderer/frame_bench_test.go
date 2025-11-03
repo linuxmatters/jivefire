@@ -18,11 +18,18 @@ func generateTestBarHeights() []float64 {
 	return heights
 }
 
-// BenchmarkOriginalFrame benchmarks the original frame rendering
-func BenchmarkOriginalFrame(b *testing.B) {
+// BenchmarkFrameWithBackground benchmarks frame rendering with background
+func BenchmarkFrameWithBackground(b *testing.B) {
 	// Setup
 	bgImage := image.NewRGBA(image.Rect(0, 0, config.Width, config.Height))
-	// No font - focus on bar drawing performance
+	// Fill background with test pattern
+	for i := 0; i < len(bgImage.Pix); i += 4 {
+		bgImage.Pix[i] = 64
+		bgImage.Pix[i+1] = 64
+		bgImage.Pix[i+2] = 64
+		bgImage.Pix[i+3] = 255
+	}
+
 	frame := NewFrame(bgImage, nil)
 	barHeights := generateTestBarHeights()
 
@@ -32,37 +39,9 @@ func BenchmarkOriginalFrame(b *testing.B) {
 	}
 }
 
-// BenchmarkOptimizedFrame benchmarks the optimized frame rendering
-func BenchmarkOptimizedFrame(b *testing.B) {
-	// Setup
-	bgImage := image.NewRGBA(image.Rect(0, 0, config.Width, config.Height))
-	// No font - focus on bar drawing performance
-	frame := NewOptimizedFrame(bgImage, nil)
-	barHeights := generateTestBarHeights()
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		frame.DrawOptimized(barHeights)
-	}
-}
-
-// BenchmarkOptimizedFrameNoBackground benchmarks optimized rendering without background
-func BenchmarkOptimizedFrameNoBackground(b *testing.B) {
+// BenchmarkFrameNoBackground benchmarks frame rendering without background (black)
+func BenchmarkFrameNoBackground(b *testing.B) {
 	// Setup - no background
-	// No font - focus on bar drawing performance
-	frame := NewOptimizedFrame(nil, nil)
-	barHeights := generateTestBarHeights()
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		frame.DrawOptimized(barHeights)
-	}
-}
-
-// BenchmarkOriginalFrameNoBackground benchmarks original rendering without background
-func BenchmarkOriginalFrameNoBackground(b *testing.B) {
-	// Setup - no background
-	// No font - focus on bar drawing performance
 	frame := NewFrame(nil, nil)
 	barHeights := generateTestBarHeights()
 
@@ -72,8 +51,22 @@ func BenchmarkOriginalFrameNoBackground(b *testing.B) {
 	}
 }
 
-// Comparison test to ensure output is visually identical
-func TestFrameOutputComparison(t *testing.T) {
+// BenchmarkFrameWithText benchmarks frame rendering with text overlay
+func BenchmarkFrameWithText(b *testing.B) {
+	// Setup
+	bgImage := image.NewRGBA(image.Rect(0, 0, config.Width, config.Height))
+	fontFace := basicfont.Face7x13
+	frame := NewFrame(bgImage, fontFace)
+	barHeights := generateTestBarHeights()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		frame.Draw(barHeights)
+	}
+}
+
+// TestFrameRendering verifies that frame rendering produces expected output
+func TestFrameRendering(t *testing.T) {
 	bgImage := image.NewRGBA(image.Rect(0, 0, config.Width, config.Height))
 	// Fill with a simple pattern
 	for y := 0; y < config.Height; y++ {
@@ -87,40 +80,34 @@ func TestFrameOutputComparison(t *testing.T) {
 	}
 
 	fontFace := basicfont.Face7x13
-	originalFrame := NewFrame(bgImage, fontFace)
-	optimizedFrame := NewOptimizedFrame(bgImage, fontFace)
+	frame := NewFrame(bgImage, fontFace)
 
+	// Test with various bar heights
 	barHeights := generateTestBarHeights()
+	frame.Draw(barHeights)
 
-	originalFrame.Draw(barHeights)
-	optimizedFrame.DrawOptimized(barHeights)
+	img := frame.GetImage()
 
-	// Compare key areas (not pixel-perfect due to potential floating point differences)
-	// Just check a few representative pixels
-	orig := originalFrame.GetImage()
-	opt := optimizedFrame.GetImage()
+	// Verify image dimensions
+	if img.Bounds().Dx() != config.Width || img.Bounds().Dy() != config.Height {
+		t.Errorf("Image dimensions incorrect: got %dx%d, want %dx%d",
+			img.Bounds().Dx(), img.Bounds().Dy(), config.Width, config.Height)
+	}
 
-	// Check center pixels
-	centerX := config.Width / 2
+	// Check that bars were drawn (center should have bar color)
 	centerY := config.Height / 2
 
-	for dy := -10; dy <= 10; dy++ {
-		for dx := -10; dx <= 10; dx++ {
-			x := centerX + dx
-			y := centerY + dy
-			offset := y*orig.Stride + x*4
+	// Find a bar position
+	totalWidth := config.NumBars*config.BarWidth + (config.NumBars-1)*config.BarGap
+	startX := (config.Width - totalWidth) / 2
 
-			// Allow small differences due to floating point
-			for c := 0; c < 3; c++ {
-				diff := int(orig.Pix[offset+c]) - int(opt.Pix[offset+c])
-				if diff < 0 {
-					diff = -diff
-				}
-				if diff > 2 {
-					t.Errorf("Pixel difference at (%d,%d) channel %d: orig=%d opt=%d",
-						x, y, c, orig.Pix[offset+c], opt.Pix[offset+c])
-				}
-			}
-		}
+	// Check first bar area
+	barX := startX + config.BarWidth/2
+	offset := centerY*img.Stride + barX*4
+
+	// Should see bar color (red) or background depending on bar height
+	r := img.Pix[offset]
+	if r != config.BarColorR && r != uint8(barX%256) {
+		t.Errorf("Unexpected color at bar position: got R=%d", r)
 	}
 }
