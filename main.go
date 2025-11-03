@@ -191,25 +191,27 @@ func main() {
 		totalBin += time.Since(t0)
 
 		// CAVA-style auto-sensitivity: work in normalized 0.0-1.0 space
-		// CAVA uses 1.0 as the hard limit - any value > 1.0 is considered overshoot
-		const overshootThreshold = 1.0 // CAVA clips at exactly 1.0
+		// Detect overshoot but use SOFT KNEE instead of hard clipping
+		const overshootThreshold = 1.0
 
 		overshootDetected := false
 		for i, h := range barHeights {
 			if h > overshootThreshold {
 				overshootDetected = true
-				// Clip to 1.0 immediately like CAVA does
-				barHeights[i] = 1.0
+				// Apply soft knee compression in normalized space (0.0-1.0)
+				// This creates smooth saturation instead of harsh clipping
+				overshoot := h - overshootThreshold
+				barHeights[i] = overshootThreshold + overshoot*math.Exp(-overshoot/overshootThreshold)
 			}
 		}
 
 		// CAVA-style sensitivity adjustment: asymmetric rates
 		if overshootDetected {
 			// Reduce sensitivity aggressively when overshooting
-			sensitivity *= 0.90 // 10% reduction per frame (much more aggressive than CAVA's 1.5%)
+			sensitivity *= 0.985 // 1.5% reduction per frame (just like CAVA's 1.5%)
 		} else {
 			// Increase sensitivity VERY slowly when undershooting (CAVA uses 1.002 = 0.2% increase)
-			sensitivity *= 1.001 // 0.1% increase per frame - slow climb back up
+			sensitivity *= 1.002 // 0.2% increase per frame - slow climb back up
 		}
 
 		// Clamp sensitivity to reasonable range
@@ -227,10 +229,8 @@ func main() {
 		availableHeight := actualAvailableSpace * maxBarHeight
 		for i := range barHeights {
 			barHeights[i] *= availableHeight
-			// Hard clip at available height
-			if barHeights[i] > availableHeight {
-				barHeights[i] = availableHeight
-			}
+			// No clip here - soft knee was already applied in normalized space
+			// Any overshoots now are from scaling, which will be handled by smoothing soft knee
 		}
 
 		// Apply CAVA-style gravity smoothing: responsive to changes
