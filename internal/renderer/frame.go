@@ -107,6 +107,9 @@ func (f *Frame) Draw(barHeights []float64) {
 
 // drawBarsNoBackground optimized path when no background (just black)
 func (f *Frame) drawBarsNoBackground(barHeights []float64) {
+	// Pre-allocate pixel pattern buffer (reused for all bars)
+	pixelPattern := make([]byte, config.BarWidth*4)
+
 	for i, h := range barHeights {
 		barHeight := int(h)
 		if barHeight <= 0 {
@@ -137,15 +140,18 @@ func (f *Frame) drawBarsNoBackground(barHeights []float64) {
 			alpha := f.alphaTable[barHeight-1-heightFromBottom]
 			colors := &f.barColorTable[alpha]
 
-			// Write entire bar width at once
-			offset := y*f.img.Stride + x*4
+			// Fill pixel pattern once for this scanline
 			for px := 0; px < config.BarWidth; px++ {
-				pixOffset := offset + px*4
-				f.img.Pix[pixOffset] = colors[0]
-				f.img.Pix[pixOffset+1] = colors[1]
-				f.img.Pix[pixOffset+2] = colors[2]
-				f.img.Pix[pixOffset+3] = 255
+				offset := px * 4
+				pixelPattern[offset] = colors[0]
+				pixelPattern[offset+1] = colors[1]
+				pixelPattern[offset+2] = colors[2]
+				pixelPattern[offset+3] = 255
 			}
+
+			// Write entire bar width with single copy
+			offset := y*f.img.Stride + x*4
+			copy(f.img.Pix[offset:offset+config.BarWidth*4], pixelPattern)
 		}
 
 		// Draw downward bar (mirror)
@@ -162,15 +168,18 @@ func (f *Frame) drawBarsNoBackground(barHeights []float64) {
 			alpha := f.alphaTable[heightFromTop]
 			colors := &f.barColorTable[alpha]
 
-			// Write entire bar width at once
-			offset := y*f.img.Stride + x*4
+			// Fill pixel pattern once for this scanline
 			for px := 0; px < config.BarWidth; px++ {
-				pixOffset := offset + px*4
-				f.img.Pix[pixOffset] = colors[0]
-				f.img.Pix[pixOffset+1] = colors[1]
-				f.img.Pix[pixOffset+2] = colors[2]
-				f.img.Pix[pixOffset+3] = 255
+				offset := px * 4
+				pixelPattern[offset] = colors[0]
+				pixelPattern[offset+1] = colors[1]
+				pixelPattern[offset+2] = colors[2]
+				pixelPattern[offset+3] = 255
 			}
+
+			// Write entire bar width with single copy
+			offset := y*f.img.Stride + x*4
+			copy(f.img.Pix[offset:offset+config.BarWidth*4], pixelPattern)
 		}
 	}
 }
