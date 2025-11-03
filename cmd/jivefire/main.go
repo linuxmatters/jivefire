@@ -133,7 +133,7 @@ func generateVideo(inputFile string, outputFile string) {
 
 	// Create audio processor and frame renderer
 	processor := audio.NewProcessor()
-	frame := renderer.NewFrame(bgImage, fontFace)
+	frame := renderer.NewOptimizedFrame(bgImage, fontFace)
 
 	// Calculate frames from profile
 	numFrames := profile.NumFrames
@@ -254,7 +254,7 @@ func generateVideo(inputFile string, outputFile string) {
 
 		// Generate frame image
 		t0 = time.Now()
-		frame.Draw(rearrangedHeights)
+		frame.DrawOptimized(rearrangedHeights)
 		totalDraw += time.Since(t0)
 
 		// Encode frame directly
@@ -359,13 +359,13 @@ func generateSnapshot(samples []float64, outputFile string, atTime float64) {
 	}
 
 	// Create frame
-	frame := renderer.NewFrame(bgImage, fontFace)
+	frame := renderer.NewOptimizedFrame(bgImage, fontFace)
 
 	// Rearrange frequencies
 	rearrangedHeights := audio.RearrangeFrequenciesCenterOut(barHeights)
 
 	// Draw frame
-	frame.Draw(rearrangedHeights)
+	frame.DrawOptimized(rearrangedHeights)
 
 	// Save as PNG
 	f, err := os.Create(outputFile)
