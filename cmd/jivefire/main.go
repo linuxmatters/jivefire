@@ -304,10 +304,10 @@ func generateVideo(inputFile string, outputFile string) {
 		"-y",
 		"-i", videoOnlyPath,
 		"-i", inputFile,
-		"-c:v", "copy",      // Copy video stream (already encoded)
-		"-c:a", "aac",       // Encode audio to AAC
-		"-b:a", "192k",      // Audio bitrate
-		"-shortest",         // Match shortest stream duration
+		"-c:v", "copy", // Copy video stream (already encoded)
+		"-c:a", "aac", // Encode audio to AAC
+		"-b:a", "192k", // Audio bitrate
+		"-shortest", // Match shortest stream duration
 		outputFile,
 	)
 	muxCmd.Stderr = os.Stderr

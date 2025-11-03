@@ -32,10 +32,16 @@ type Encoder struct {
 	audioCodec    *ffmpeg.AVCodecContext
 	audioInputCtx *ffmpeg.AVFormatContext
 	audioDecoder  *ffmpeg.AVCodecContext
+	audioStreamIndex int
 
 	// Timestamp tracking
 	nextVideoPts int64
 	nextAudioPts int64
+
+	// Audio processing frames/packets
+	audioPacket   *ffmpeg.AVPacket
+	audioDecFrame *ffmpeg.AVFrame
+	audioEncFrame *ffmpeg.AVFrame
 }
 
 // New creates a new encoder instance
@@ -144,6 +150,13 @@ func (e *Encoder) Initialize() error {
 	}
 	e.formatCtx.SetPb(pb)
 
+	// Initialize audio if path provided
+	if e.config.AudioPath != "" {
+		if err := e.initializeAudio(); err != nil {
+			return fmt.Errorf("failed to initialize audio: %w", err)
+		}
+	}
+
 	// Write file header
 	ret, err = ffmpeg.AVFormatWriteHeader(e.formatCtx, nil)
 	if err != nil {
@@ -151,6 +164,132 @@ func (e *Encoder) Initialize() error {
 	}
 	if ret < 0 {
 		return fmt.Errorf("failed to write header: %d", ret)
+	}
+
+	return nil
+}
+
+// initializeAudio sets up audio decoder and encoder
+func (e *Encoder) initializeAudio() error {
+	// Open input audio file
+	audioPath := ffmpeg.ToCStr(e.config.AudioPath)
+	defer audioPath.Free()
+	
+	ret, err := ffmpeg.AVFormatOpenInput(&e.audioInputCtx, audioPath, nil, nil)
+	if err != nil {
+		return fmt.Errorf("failed to open audio input: %w", err)
+	}
+	if ret < 0 {
+		return fmt.Errorf("failed to open audio input: %d", ret)
+	}
+
+	ret, err = ffmpeg.AVFormatFindStreamInfo(e.audioInputCtx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to find audio stream info: %w", err)
+	}
+	if ret < 0 {
+		return fmt.Errorf("failed to find audio stream info: %d", ret)
+	}
+
+	// Find audio stream
+	audioStreamIdx := -1
+	streams := e.audioInputCtx.Streams()
+	for i := uintptr(0); i < uintptr(e.audioInputCtx.NbStreams()); i++ {
+		stream := streams.Get(i)
+		if stream.Codecpar().CodecType() == ffmpeg.AVMediaTypeAudio {
+			audioStreamIdx = int(i)
+			break
+		}
+	}
+	if audioStreamIdx == -1 {
+		return fmt.Errorf("no audio stream found in input file")
+	}
+
+	audioInputStream := streams.Get(uintptr(audioStreamIdx))
+
+	// Set up decoder for input audio
+	audioDecoder := ffmpeg.AVCodecFindDecoder(audioInputStream.Codecpar().CodecId())
+	if audioDecoder == nil {
+		return fmt.Errorf("audio decoder not found")
+	}
+
+	e.audioDecoder = ffmpeg.AVCodecAllocContext3(audioDecoder)
+	if e.audioDecoder == nil {
+		return fmt.Errorf("failed to allocate audio decoder context")
+	}
+
+	ret, err = ffmpeg.AVCodecParametersToContext(e.audioDecoder, audioInputStream.Codecpar())
+	if err != nil {
+		return fmt.Errorf("failed to copy decoder parameters: %w", err)
+	}
+	if ret < 0 {
+		return fmt.Errorf("failed to copy decoder parameters: %d", ret)
+	}
+
+	ret, err = ffmpeg.AVCodecOpen2(e.audioDecoder, audioDecoder, nil)
+	if err != nil {
+		return fmt.Errorf("failed to open audio decoder: %w", err)
+	}
+	if ret < 0 {
+		return fmt.Errorf("failed to open audio decoder: %d", ret)
+	}
+
+	// Set up AAC encoder for output
+	audioEncoder := ffmpeg.AVCodecFindEncoder(ffmpeg.AVCodecIdAac)
+	if audioEncoder == nil {
+		return fmt.Errorf("AAC encoder not found")
+	}
+
+	e.audioStream = ffmpeg.AVFormatNewStream(e.formatCtx, nil)
+	if e.audioStream == nil {
+		return fmt.Errorf("failed to create audio stream")
+	}
+	e.audioStream.SetId(1)
+
+	e.audioCodec = ffmpeg.AVCodecAllocContext3(audioEncoder)
+	if e.audioCodec == nil {
+		return fmt.Errorf("failed to allocate audio encoder context")
+	}
+
+	// Configure AAC encoder
+	e.audioCodec.SetSampleFmt(ffmpeg.AVSampleFmtFltp)  // AAC requires float planar
+	e.audioCodec.SetSampleRate(e.audioDecoder.SampleRate())
+	
+	// AAC encoder requires stereo - if input is mono, we'll duplicate channels  
+	// Using the older channel layout API
+	// 3 = AV_CH_LAYOUT_STEREO (left + right channels)
+	e.audioCodec.SetChannelLayout(3)
+	e.audioCodec.SetChannels(2)
+	
+	e.audioCodec.SetBitRate(192000) // 192 kbps
+	e.audioStream.SetTimeBase(ffmpeg.AVMakeQ(1, e.audioCodec.SampleRate()))
+
+	ret, err = ffmpeg.AVCodecOpen2(e.audioCodec, audioEncoder, nil)
+	if err != nil {
+		return fmt.Errorf("failed to open audio encoder: %w", err)
+	}
+	if ret < 0 {
+		return fmt.Errorf("failed to open audio encoder: %d", ret)
+	}
+
+	ret, err = ffmpeg.AVCodecParametersFromContext(e.audioStream.Codecpar(), e.audioCodec)
+	if err != nil {
+		return fmt.Errorf("failed to copy audio encoder parameters: %w", err)
+	}
+	if ret < 0 {
+		return fmt.Errorf("failed to copy audio encoder parameters: %d", ret)
+	}
+
+	// Store the audio stream index
+	e.audioStreamIndex = audioStreamIdx
+
+	// Allocate frames and packet for audio processing
+	e.audioPacket = ffmpeg.AVPacketAlloc()
+	e.audioDecFrame = ffmpeg.AVFrameAlloc()
+	e.audioEncFrame = ffmpeg.AVFrameAlloc()
+
+	if e.audioPacket == nil || e.audioDecFrame == nil || e.audioEncFrame == nil {
+		return fmt.Errorf("failed to allocate audio frames/packet")
 	}
 
 	return nil
@@ -262,6 +401,137 @@ func (e *Encoder) WriteFrame(rgbData []byte) error {
 	return nil
 }
 
+// ProcessAudio reads and processes all audio from the input file
+func (e *Encoder) ProcessAudio() error {
+	if e.audioInputCtx == nil {
+		return errors.New("audio not initialized")
+	}
+
+	// Process all audio packets
+	for {
+		// Read a packet from the input
+		ret, err := ffmpeg.AVReadFrame(e.audioInputCtx, e.audioPacket)
+		if err != nil {
+			if errors.Is(err, ffmpeg.AVErrorEOF) {
+				// End of file - flush decoder
+				break
+			}
+			return fmt.Errorf("failed to read audio frame: %w", err)
+		}
+		if ret < 0 {
+			return fmt.Errorf("failed to read audio frame: %d", ret)
+		}
+
+		// Only process audio packets
+		if e.audioPacket.StreamIndex() != e.audioStreamIndex {
+			ffmpeg.AVPacketUnref(e.audioPacket)
+			continue
+		}
+
+		// Send packet to decoder
+		ret, err = ffmpeg.AVCodecSendPacket(e.audioDecoder, e.audioPacket)
+		if err != nil {
+			ffmpeg.AVPacketUnref(e.audioPacket)
+			return fmt.Errorf("failed to send audio packet to decoder: %w", err)
+		}
+
+		// Receive decoded frames
+		for {
+			ret, err = ffmpeg.AVCodecReceiveFrame(e.audioDecoder, e.audioDecFrame)
+			if err != nil {
+				if errors.Is(err, ffmpeg.AVErrorEOF) || errors.Is(err, ffmpeg.EAgain) {
+					break
+				}
+				ffmpeg.AVPacketUnref(e.audioPacket)
+				return fmt.Errorf("failed to receive audio frame from decoder: %w", err)
+			}
+
+			// Send decoded frame to encoder
+			ret, err = ffmpeg.AVCodecSendFrame(e.audioCodec, e.audioDecFrame)
+			if err != nil {
+				ffmpeg.AVPacketUnref(e.audioPacket)
+				return fmt.Errorf("failed to send audio frame to encoder: %w", err)
+			}
+
+			// Receive encoded packets
+			for {
+				encodedPkt := ffmpeg.AVPacketAlloc()
+				ret, err = ffmpeg.AVCodecReceivePacket(e.audioCodec, encodedPkt)
+				if err != nil || errors.Is(err, ffmpeg.EAgain) || errors.Is(err, ffmpeg.AVErrorEOF) {
+					ffmpeg.AVPacketFree(&encodedPkt)
+					break
+				}
+				if ret < 0 {
+					ffmpeg.AVPacketFree(&encodedPkt)
+					ffmpeg.AVPacketUnref(e.audioPacket)
+					return fmt.Errorf("failed to receive audio packet from encoder: %d", ret)
+				}
+
+				// Set stream index and timestamps
+				encodedPkt.SetStreamIndex(e.audioStream.Index())
+				ffmpeg.AVPacketRescaleTs(encodedPkt, e.audioCodec.TimeBase(), e.audioStream.TimeBase())
+
+				// Write packet to output
+				ret, err = ffmpeg.AVInterleavedWriteFrame(e.formatCtx, encodedPkt)
+				ffmpeg.AVPacketFree(&encodedPkt)
+				if err != nil {
+					ffmpeg.AVPacketUnref(e.audioPacket)
+					return fmt.Errorf("failed to write audio packet: %w", err)
+				}
+			}
+		}
+
+		ffmpeg.AVPacketUnref(e.audioPacket)
+	}
+
+	// Flush encoder
+	ffmpeg.AVCodecSendPacket(e.audioDecoder, nil)
+	
+	// Process remaining frames in decoder
+	for {
+		_, err := ffmpeg.AVCodecReceiveFrame(e.audioDecoder, e.audioDecFrame)
+		if err != nil || errors.Is(err, ffmpeg.AVErrorEOF) {
+			break
+		}
+
+		// Send to encoder and process as above
+		ffmpeg.AVCodecSendFrame(e.audioCodec, e.audioDecFrame)
+		
+		for {
+			encodedPkt := ffmpeg.AVPacketAlloc()
+			_, err := ffmpeg.AVCodecReceivePacket(e.audioCodec, encodedPkt)
+			if err != nil || errors.Is(err, ffmpeg.EAgain) || errors.Is(err, ffmpeg.AVErrorEOF) {
+				ffmpeg.AVPacketFree(&encodedPkt)
+				break
+			}
+
+			encodedPkt.SetStreamIndex(e.audioStream.Index())
+			ffmpeg.AVPacketRescaleTs(encodedPkt, e.audioCodec.TimeBase(), e.audioStream.TimeBase())
+			ffmpeg.AVInterleavedWriteFrame(e.formatCtx, encodedPkt)
+			ffmpeg.AVPacketFree(&encodedPkt)
+		}
+	}
+
+	// Flush encoder
+	ffmpeg.AVCodecSendFrame(e.audioCodec, nil)
+	
+	for {
+		encodedPkt := ffmpeg.AVPacketAlloc()
+		_, err := ffmpeg.AVCodecReceivePacket(e.audioCodec, encodedPkt)
+		if err != nil || errors.Is(err, ffmpeg.AVErrorEOF) {
+			ffmpeg.AVPacketFree(&encodedPkt)
+			break
+		}
+
+		encodedPkt.SetStreamIndex(e.audioStream.Index())
+		ffmpeg.AVPacketRescaleTs(encodedPkt, e.audioCodec.TimeBase(), e.audioStream.TimeBase())
+		ffmpeg.AVInterleavedWriteFrame(e.formatCtx, encodedPkt)
+		ffmpeg.AVPacketFree(&encodedPkt)
+	}
+
+	return nil
+}
+
 // Close finalizes the output file and frees resources
 func (e *Encoder) Close() error {
 	// Flush encoder
@@ -298,9 +568,31 @@ func (e *Encoder) Close() error {
 		}
 	}
 
-	// Free codec context
+	// Free codec contexts
 	if e.videoCodec != nil {
 		ffmpeg.AVCodecFreeContext(&e.videoCodec)
+	}
+	if e.audioCodec != nil {
+		ffmpeg.AVCodecFreeContext(&e.audioCodec)
+	}
+	if e.audioDecoder != nil {
+		ffmpeg.AVCodecFreeContext(&e.audioDecoder)
+	}
+
+	// Free audio resources
+	if e.audioPacket != nil {
+		ffmpeg.AVPacketFree(&e.audioPacket)
+	}
+	if e.audioDecFrame != nil {
+		ffmpeg.AVFrameFree(&e.audioDecFrame)
+	}
+	if e.audioEncFrame != nil {
+		ffmpeg.AVFrameFree(&e.audioEncFrame)
+	}
+	
+	// Close and free audio input context
+	if e.audioInputCtx != nil {
+		ffmpeg.AVFormatCloseInput(&e.audioInputCtx)
 	}
 
 	// Free format context
