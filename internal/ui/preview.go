@@ -22,6 +22,7 @@ func DefaultPreviewConfig() PreviewConfig {
 
 // DownsampleFrame takes a full-resolution RGB frame and downsamples it to preview size
 // Each terminal cell represents a rectangular region of the source image
+// Averages all pixels in each region for smooth, high-quality downsampling
 func DownsampleFrame(frame *image.RGBA, config PreviewConfig) [][]color.Gray {
 	bounds := frame.Bounds()
 	srcWidth := bounds.Dx()
@@ -39,13 +40,31 @@ func DownsampleFrame(frame *image.RGBA, config PreviewConfig) [][]color.Gray {
 			srcX := col * cellWidth
 			srcY := row * cellHeight
 
-			// Sample the center pixel of this region
-			// (Could average multiple pixels for better quality, but this is fast)
-			r, g, b, _ := frame.At(srcX, srcY).RGBA()
+			// Average all pixels in this cell region for better quality
+			var sumR, sumG, sumB uint32
+			pixelCount := 0
 
-			// Convert to 8-bit and calculate luminance
-			gray := rgbToGrayscale(uint8(r>>8), uint8(g>>8), uint8(b>>8))
-			preview[row][col] = color.Gray{Y: gray}
+			for y := srcY; y < srcY+cellHeight && y < srcHeight; y++ {
+				for x := srcX; x < srcX+cellWidth && x < srcWidth; x++ {
+					r, g, b, _ := frame.At(x, y).RGBA()
+					// RGBA() returns 16-bit values, convert to 8-bit
+					sumR += uint32(r >> 8)
+					sumG += uint32(g >> 8)
+					sumB += uint32(b >> 8)
+					pixelCount++
+				}
+			}
+
+			// Calculate average RGB values
+			if pixelCount > 0 {
+				avgR := uint8(sumR / uint32(pixelCount))
+				avgG := uint8(sumG / uint32(pixelCount))
+				avgB := uint8(sumB / uint32(pixelCount))
+
+				// Convert to grayscale using luminance formula
+				gray := rgbToGrayscale(avgR, avgG, avgB)
+				preview[row][col] = color.Gray{Y: gray}
+			}
 		}
 	}
 
