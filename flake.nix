@@ -23,6 +23,7 @@
           packages = with pkgs; [
             curl
             ffmpeg
+            gcc
             go
             just
             mediainfo

@@ -4,6 +4,7 @@ go 1.24.0
 
 require (
 	github.com/alecthomas/kong v1.12.1
+	github.com/csnewman/ffmpeg-go v0.6.0
 	github.com/go-audio/audio v1.0.0
 	github.com/go-audio/wav v1.1.0
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0
