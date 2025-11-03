@@ -70,9 +70,6 @@ func NewFrame(bgImage *image.RGBA, fontFace font.Face) *Frame {
 		hasBackground: bgImage != nil,
 	}
 
-	// Text overlay rendering will be done directly for now
-	// TODO: Implement efficient pre-rendered text overlay
-
 	return f
 }
 
@@ -257,10 +254,8 @@ func (f *Frame) drawBarsWithBackground(barHeights []float64) {
 	}
 }
 
-// applyTextOverlay blends pre-rendered text onto the frame
+// applyTextOverlay renders text onto the frame
 func (f *Frame) applyTextOverlay() {
-	// For now, just call the original text drawing functions
-	// TODO: Optimize text overlay blending
 	if f.fontFace != nil {
 		DrawCenterText(f.img, f.fontFace, "Linux Matters Sample Text", f.centerY)
 		DrawEpisodeNumber(f.img, f.fontFace, "00")
