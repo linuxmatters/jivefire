@@ -121,33 +121,84 @@ FFmpeg: Encode video + mux audio
 
 ```bash
 go mod tidy
-go build -o visualizer
+go build -o visualizer ./cmd/visualizer
 ```
+
+## Project Structure
+
+```
+.
+├── cmd/
+│   └── visualizer/       # Main application entry point
+│       └── main.go
+├── internal/             # Private application code
+│   ├── audio/           # Audio processing
+│   │   ├── reader.go    # WAV file reading
+│   │   └── fft.go       # FFT analysis and binning
+│   ├── renderer/        # Frame rendering
+│   │   ├── assets.go    # Asset loading (fonts, images)
+│   │   └── frame.go     # Frame drawing logic
+│   └── config/          # Configuration constants
+│       └── config.go
+├── assets/              # Fonts and background images
+│   ├── bg.png
+│   └── Poppins-Regular.ttf
+├── testdata/            # Test audio files
+│   ├── dream.wav
+│   └── test.mp4
+├── go.mod
+├── go.sum
+├── flake.nix           # Nix development environment
+└── README.md
+```
+
+The project follows standard Go conventions:
+- `cmd/visualizer/` - Application entry point and CLI orchestration
+- `internal/` - Private packages that cannot be imported by external projects
+- `assets/` - Static resources (fonts, backgrounds)
+- `testdata/` - Test files (following Go testing conventions)
 
 ## Usage
 
 ```bash
-./visualizer input.wav output.mp4
+./visualizer testdata/dream.wav output.mp4
 ```
 
 **Example:**
 ```bash
-./visualizer dream.wav test-go-bars.mp4
+./visualizer testdata/dream.wav test-go-bars.mp4
 ```
 
 ## Implementation Details
+
+### Code Organization
+
+The codebase is organized into distinct packages following Go best practices:
+
+**`internal/config`** - All visualization constants (dimensions, colors, FFT settings)
+
+**`internal/audio`** - Audio processing pipeline:
+- `reader.go` - WAV file reading and sample conversion
+- `fft.go` - FFT computation, frequency binning, and CAVA-style smoothing
+
+**`internal/renderer`** - Frame rendering pipeline:
+- `assets.go` - Asset loading (fonts, background images)
+- `frame.go` - Bar visualization and text overlay rendering
+
+**`cmd/visualizer`** - Main application entry point and CLI orchestration
 
 ### Dependencies
 - `gonum.org/v1/gonum/dsp/fourier` - FFT computation
 - `github.com/go-audio/wav` - WAV file reading
 - `github.com/go-audio/audio` - Audio buffer utilities
+- `github.com/golang/freetype` - Font rendering
+- `golang.org/x/image/font` - Font interface
 
-### Key Functions
-- `readWAV()` - Load audio, convert to float64 samples
-- `applyHanning()` - Apply Hanning window to FFT input
-- `binFFT()` - Group FFT coefficients into discrete bars with log scaling
-- `drawFrame()` - Generate RGB24 image with bars (direct pixel writes)
-- `writeRawRGB()` - Pipe raw frames to FFmpeg stdin
+### Key Components
+- **Audio Processor** - FFT analysis with Hanning window and frequency binning
+- **Frame Renderer** - Optimized pixel-level bar drawing with gradient effects
+- **CAVA Algorithm** - Gravity-based decay and integral smoothing for natural animation
+- **Asset Manager** - Background image scaling and font loading
 
 ### Constants (Tunable)
 ```go
