@@ -6,7 +6,6 @@ import (
 	"io"
 	"math"
 	"os"
-	"os/exec"
 	"time"
 
 	"github.com/alecthomas/kong"
@@ -96,16 +95,13 @@ func generateVideo(inputFile string, outputFile string) {
 	}
 	defer reader.Close()
 
-	// Create temporary video file (without audio)
-	videoOnlyPath := outputFile + ".video.mp4"
-	defer os.Remove(videoOnlyPath) // Clean up temp file
-
-	// Initialize encoder for video-only output
+	// Initialize encoder with both video and audio
 	enc, err := encoder.New(encoder.Config{
-		OutputPath: videoOnlyPath,
+		OutputPath: outputFile,
 		Width:      config.Width,
 		Height:     config.Height,
 		Framerate:  config.FPS,
+		AudioPath:  inputFile, // Enable Phase 2B audio processing
 	})
 	if err != nil {
 		fmt.Printf("Error creating encoder: %v\n", err)
@@ -292,27 +288,16 @@ func generateVideo(inputFile string, outputFile string) {
 		}
 	}
 
-	fmt.Printf("\nFinalizing video...\n")
-	if err := enc.Close(); err != nil {
-		fmt.Printf("Error closing encoder: %v\n", err)
+	// Process audio through the encoder
+	fmt.Printf("\nProcessing audio...\n")
+	if err := enc.ProcessAudio(); err != nil {
+		fmt.Printf("Error processing audio: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Mux video with audio using FFmpeg
-	fmt.Printf("Muxing audio track...\n")
-	muxCmd := exec.Command("ffmpeg",
-		"-y",
-		"-i", videoOnlyPath,
-		"-i", inputFile,
-		"-c:v", "copy", // Copy video stream (already encoded)
-		"-c:a", "aac", // Encode audio to AAC
-		"-b:a", "192k", // Audio bitrate
-		"-shortest", // Match shortest stream duration
-		outputFile,
-	)
-	muxCmd.Stderr = os.Stderr
-	if err := muxCmd.Run(); err != nil {
-		fmt.Printf("Error muxing audio: %v\n", err)
+	fmt.Printf("\nFinalizing video...\n")
+	if err := enc.Close(); err != nil {
+		fmt.Printf("Error closing encoder: %v\n", err)
 		os.Exit(1)
 	}
 

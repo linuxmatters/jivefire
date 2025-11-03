@@ -3,8 +3,10 @@ package encoder
 import (
 	"errors"
 	"fmt"
+	"math"
+	"unsafe"
 
-	"github.com/csnewman/ffmpeg-go"
+	ffmpeg "github.com/csnewman/ffmpeg-go"
 )
 
 // Config holds the encoder configuration
@@ -14,6 +16,48 @@ type Config struct {
 	Height     int    // Video height in pixels
 	Framerate  int    // Frames per second
 	AudioPath  string // Path to input WAV file (for Phase 2)
+}
+
+// AudioFIFO provides a simple FIFO buffer for audio samples
+type AudioFIFO struct {
+	buffer []float32
+	size   int
+}
+
+// NewAudioFIFO creates a new audio FIFO buffer
+func NewAudioFIFO() *AudioFIFO {
+	return &AudioFIFO{
+		buffer: make([]float32, 0, 4096), // Start with reasonable capacity
+	}
+}
+
+// Push adds samples to the FIFO
+func (f *AudioFIFO) Push(samples []float32) {
+	f.buffer = append(f.buffer, samples...)
+	f.size = len(f.buffer)
+}
+
+// Pop removes and returns the requested number of samples
+// Returns nil if not enough samples available
+func (f *AudioFIFO) Pop(count int) []float32 {
+	if f.size < count {
+		return nil
+	}
+
+	result := make([]float32, count)
+	copy(result, f.buffer[:count])
+
+	// Shift remaining samples
+	copy(f.buffer, f.buffer[count:])
+	f.buffer = f.buffer[:f.size-count]
+	f.size -= count
+
+	return result
+}
+
+// Available returns the number of samples in the buffer
+func (f *AudioFIFO) Available() int {
+	return f.size
 }
 
 // Encoder wraps FFmpeg encoding functionality
@@ -28,10 +72,10 @@ type Encoder struct {
 	videoCodec  *ffmpeg.AVCodecContext
 
 	// Audio stream and encoder (Phase 2)
-	audioStream   *ffmpeg.AVStream
-	audioCodec    *ffmpeg.AVCodecContext
-	audioInputCtx *ffmpeg.AVFormatContext
-	audioDecoder  *ffmpeg.AVCodecContext
+	audioStream      *ffmpeg.AVStream
+	audioCodec       *ffmpeg.AVCodecContext
+	audioInputCtx    *ffmpeg.AVFormatContext
+	audioDecoder     *ffmpeg.AVCodecContext
 	audioStreamIndex int
 
 	// Timestamp tracking
@@ -42,6 +86,9 @@ type Encoder struct {
 	audioPacket   *ffmpeg.AVPacket
 	audioDecFrame *ffmpeg.AVFrame
 	audioEncFrame *ffmpeg.AVFrame
+
+	// Audio resampling (pure Go)
+	audioFIFO *AudioFIFO // FIFO for frame size adjustment
 }
 
 // New creates a new encoder instance
@@ -174,7 +221,7 @@ func (e *Encoder) initializeAudio() error {
 	// Open input audio file
 	audioPath := ffmpeg.ToCStr(e.config.AudioPath)
 	defer audioPath.Free()
-	
+
 	ret, err := ffmpeg.AVFormatOpenInput(&e.audioInputCtx, audioPath, nil, nil)
 	if err != nil {
 		return fmt.Errorf("failed to open audio input: %w", err)
@@ -234,6 +281,10 @@ func (e *Encoder) initializeAudio() error {
 		return fmt.Errorf("failed to open audio decoder: %d", ret)
 	}
 
+	// Log the decoder's output format
+	fmt.Printf("Audio decoder output format: %d (sample rate: %d, channels: %d)\n",
+		e.audioDecoder.SampleFmt(), e.audioDecoder.SampleRate(), e.audioDecoder.Channels())
+
 	// Set up AAC encoder for output
 	audioEncoder := ffmpeg.AVCodecFindEncoder(ffmpeg.AVCodecIdAac)
 	if audioEncoder == nil {
@@ -252,15 +303,15 @@ func (e *Encoder) initializeAudio() error {
 	}
 
 	// Configure AAC encoder
-	e.audioCodec.SetSampleFmt(ffmpeg.AVSampleFmtFltp)  // AAC requires float planar
+	e.audioCodec.SetSampleFmt(ffmpeg.AVSampleFmtFltp) // AAC requires float planar
 	e.audioCodec.SetSampleRate(e.audioDecoder.SampleRate())
-	
-	// AAC encoder requires stereo - if input is mono, we'll duplicate channels  
+
+	// AAC encoder requires stereo - if input is mono, we'll duplicate channels
 	// Using the older channel layout API
 	// 3 = AV_CH_LAYOUT_STEREO (left + right channels)
 	e.audioCodec.SetChannelLayout(3)
 	e.audioCodec.SetChannels(2)
-	
+
 	e.audioCodec.SetBitRate(192000) // 192 kbps
 	e.audioStream.SetTimeBase(ffmpeg.AVMakeQ(1, e.audioCodec.SampleRate()))
 
@@ -290,6 +341,21 @@ func (e *Encoder) initializeAudio() error {
 
 	if e.audioPacket == nil || e.audioDecFrame == nil || e.audioEncFrame == nil {
 		return fmt.Errorf("failed to allocate audio frames/packet")
+	}
+
+	// Initialize audio FIFO for frame size adjustment
+	e.audioFIFO = NewAudioFIFO()
+
+	// Configure encoder frame with correct size
+	e.audioEncFrame.SetNbSamples(e.audioCodec.FrameSize())
+	e.audioEncFrame.SetFormat(int(ffmpeg.AVSampleFmtFltp))
+	e.audioEncFrame.SetChannelLayout(3) // AV_CH_LAYOUT_STEREO
+	e.audioEncFrame.SetChannels(2)
+	e.audioEncFrame.SetSampleRate(e.audioCodec.SampleRate())
+
+	ret, err = ffmpeg.AVFrameGetBuffer(e.audioEncFrame, 0)
+	if err != nil {
+		return fmt.Errorf("failed to allocate encoder frame buffer: %w", err)
 	}
 
 	return nil
@@ -401,11 +467,113 @@ func (e *Encoder) WriteFrame(rgbData []byte) error {
 	return nil
 }
 
+// monoToStereo converts mono float32 samples to stereo by duplicating the channel
+// monoToStereo duplicates a mono channel into stereo
+func monoToStereo(mono []float32) []float32 {
+	stereo := make([]float32, len(mono)*2)
+	for i := 0; i < len(mono); i++ {
+		// Clamp values to prevent NaN/Inf issues
+		val := mono[i]
+		if math.IsNaN(float64(val)) || math.IsInf(float64(val), 0) {
+			val = 0
+		} else if val > 1.0 {
+			val = 1.0
+		} else if val < -1.0 {
+			val = -1.0
+		}
+		stereo[i*2] = val
+		stereo[i*2+1] = val
+	}
+	return stereo
+}
+
+// extractMonoFloats extracts float samples from a decoded frame
+func extractMonoFloats(frame *ffmpeg.AVFrame) ([]float32, error) {
+	// Get frame properties
+	nbSamples := frame.NbSamples()
+	sampleFormat := frame.Format()
+
+	// Get first channel data pointer using .Get() method
+	dataPtr := frame.Data().Get(0)
+	if dataPtr == nil {
+		return nil, fmt.Errorf("no data in first channel")
+	}
+
+	samples := make([]float32, nbSamples)
+
+	// Check the sample format and convert accordingly
+	// AVSampleFmtS16 = 1 (signed 16-bit)
+	// AVSampleFmtFlt = 3 (float)
+	// AVSampleFmtS16P = 6 (signed 16-bit planar)
+	// AVSampleFmtFltp = 8 (float planar)
+
+	switch sampleFormat {
+	case 1: // AVSampleFmtS16 - interleaved 16-bit signed
+		// Convert to byte slice for reading 16-bit samples
+		dataSlice := (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[: nbSamples*2 : nbSamples*2]
+		for i := 0; i < nbSamples; i++ {
+			// Read 16-bit signed integer (little-endian)
+			val := int16(dataSlice[i*2]) | int16(dataSlice[i*2+1])<<8
+			// Convert to float32 in range [-1.0, 1.0]
+			samples[i] = float32(val) / 32768.0
+		}
+
+	case 3, 8: // AVSampleFmtFlt or AVSampleFmtFltp - float format
+		// Convert to byte slice for reading float32 samples
+		dataSlice := (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[: nbSamples*4 : nbSamples*4]
+		for i := 0; i < nbSamples; i++ {
+			// Read 4 bytes as float32 (little-endian)
+			bits := uint32(dataSlice[i*4]) |
+				uint32(dataSlice[i*4+1])<<8 |
+				uint32(dataSlice[i*4+2])<<16 |
+				uint32(dataSlice[i*4+3])<<24
+			samples[i] = *(*float32)(unsafe.Pointer(&bits))
+		}
+
+	default:
+		return nil, fmt.Errorf("unsupported sample format: %d", sampleFormat)
+	}
+
+	return samples, nil
+}
+
+// writeStereoFloats writes stereo float samples to an encoder frame
+func writeStereoFloats(frame *ffmpeg.AVFrame, samples []float32) error {
+	nbSamples := len(samples) / 2 // stereo has 2 channels
+
+	// Get pointers for both channels (planar format) using .Get() method
+	leftPtr := frame.Data().Get(0)
+	rightPtr := frame.Data().Get(1)
+
+	if leftPtr == nil || rightPtr == nil {
+		return fmt.Errorf("frame data pointers not allocated")
+	}
+
+	// Convert to byte slices for writing
+	leftData := (*[1 << 30]byte)(unsafe.Pointer(leftPtr))[: nbSamples*4 : nbSamples*4]
+	rightData := (*[1 << 30]byte)(unsafe.Pointer(rightPtr))[: nbSamples*4 : nbSamples*4]
+
+	// Write samples to both channels
+	for i := 0; i < nbSamples; i++ {
+		// Write left channel - direct float32 byte copy
+		leftFloat := samples[i*2]
+		copy(leftData[i*4:(i+1)*4], (*[4]byte)(unsafe.Pointer(&leftFloat))[:])
+
+		// Write right channel - direct float32 byte copy
+		rightFloat := samples[i*2+1]
+		copy(rightData[i*4:(i+1)*4], (*[4]byte)(unsafe.Pointer(&rightFloat))[:])
+	}
+
+	return nil
+}
+
 // ProcessAudio reads and processes all audio from the input file
 func (e *Encoder) ProcessAudio() error {
 	if e.audioInputCtx == nil {
 		return errors.New("audio not initialized")
 	}
+
+	encoderFrameSize := e.audioCodec.FrameSize() // Should be 1024 for AAC
 
 	// Process all audio packets
 	for {
@@ -446,37 +614,67 @@ func (e *Encoder) ProcessAudio() error {
 				return fmt.Errorf("failed to receive audio frame from decoder: %w", err)
 			}
 
-			// Send decoded frame to encoder
-			ret, err = ffmpeg.AVCodecSendFrame(e.audioCodec, e.audioDecFrame)
+			// Extract mono float samples from decoded frame
+			monoSamples, err := extractMonoFloats(e.audioDecFrame)
 			if err != nil {
 				ffmpeg.AVPacketUnref(e.audioPacket)
-				return fmt.Errorf("failed to send audio frame to encoder: %w", err)
+				return fmt.Errorf("failed to extract mono samples: %w", err)
 			}
 
-			// Receive encoded packets
-			for {
-				encodedPkt := ffmpeg.AVPacketAlloc()
-				ret, err = ffmpeg.AVCodecReceivePacket(e.audioCodec, encodedPkt)
-				if err != nil || errors.Is(err, ffmpeg.EAgain) || errors.Is(err, ffmpeg.AVErrorEOF) {
-					ffmpeg.AVPacketFree(&encodedPkt)
-					break
-				}
-				if ret < 0 {
-					ffmpeg.AVPacketFree(&encodedPkt)
+			// Convert mono to stereo
+			stereoSamples := monoToStereo(monoSamples)
+
+			// Push to FIFO
+			e.audioFIFO.Push(stereoSamples)
+
+			// Process all complete frames in FIFO
+			for e.audioFIFO.Available() >= encoderFrameSize*2 { // *2 for stereo
+				// Pop exactly one encoder frame worth of samples
+				frameSamples := e.audioFIFO.Pop(encoderFrameSize * 2)
+
+				// Make frame writable and write samples
+				ffmpeg.AVFrameMakeWritable(e.audioEncFrame)
+				if err := writeStereoFloats(e.audioEncFrame, frameSamples); err != nil {
 					ffmpeg.AVPacketUnref(e.audioPacket)
-					return fmt.Errorf("failed to receive audio packet from encoder: %d", ret)
+					return fmt.Errorf("failed to write stereo samples: %w", err)
 				}
 
-				// Set stream index and timestamps
-				encodedPkt.SetStreamIndex(e.audioStream.Index())
-				ffmpeg.AVPacketRescaleTs(encodedPkt, e.audioCodec.TimeBase(), e.audioStream.TimeBase())
+				// Set PTS
+				e.audioEncFrame.SetPts(e.nextAudioPts)
+				e.nextAudioPts += int64(encoderFrameSize)
 
-				// Write packet to output
-				ret, err = ffmpeg.AVInterleavedWriteFrame(e.formatCtx, encodedPkt)
-				ffmpeg.AVPacketFree(&encodedPkt)
+				// Send to encoder
+				ret, err = ffmpeg.AVCodecSendFrame(e.audioCodec, e.audioEncFrame)
 				if err != nil {
 					ffmpeg.AVPacketUnref(e.audioPacket)
-					return fmt.Errorf("failed to write audio packet: %w", err)
+					return fmt.Errorf("failed to send audio frame to encoder: %w", err)
+				}
+
+				// Receive encoded packets
+				for {
+					encodedPkt := ffmpeg.AVPacketAlloc()
+					ret, err = ffmpeg.AVCodecReceivePacket(e.audioCodec, encodedPkt)
+					if err != nil || errors.Is(err, ffmpeg.EAgain) || errors.Is(err, ffmpeg.AVErrorEOF) {
+						ffmpeg.AVPacketFree(&encodedPkt)
+						break
+					}
+					if ret < 0 {
+						ffmpeg.AVPacketFree(&encodedPkt)
+						ffmpeg.AVPacketUnref(e.audioPacket)
+						return fmt.Errorf("failed to receive audio packet from encoder: %d", ret)
+					}
+
+					// Set stream index and timestamps
+					encodedPkt.SetStreamIndex(e.audioStream.Index())
+					ffmpeg.AVPacketRescaleTs(encodedPkt, e.audioCodec.TimeBase(), e.audioStream.TimeBase())
+
+					// Write packet to output
+					ret, err = ffmpeg.AVInterleavedWriteFrame(e.formatCtx, encodedPkt)
+					ffmpeg.AVPacketFree(&encodedPkt)
+					if err != nil {
+						ffmpeg.AVPacketUnref(e.audioPacket)
+						return fmt.Errorf("failed to write audio packet: %w", err)
+					}
 				}
 			}
 		}
@@ -484,9 +682,9 @@ func (e *Encoder) ProcessAudio() error {
 		ffmpeg.AVPacketUnref(e.audioPacket)
 	}
 
-	// Flush encoder
+	// Flush decoder
 	ffmpeg.AVCodecSendPacket(e.audioDecoder, nil)
-	
+
 	// Process remaining frames in decoder
 	for {
 		_, err := ffmpeg.AVCodecReceiveFrame(e.audioDecoder, e.audioDecFrame)
@@ -494,13 +692,63 @@ func (e *Encoder) ProcessAudio() error {
 			break
 		}
 
-		// Send to encoder and process as above
-		ffmpeg.AVCodecSendFrame(e.audioCodec, e.audioDecFrame)
-		
+		// Extract and process same as above
+		monoSamples, _ := extractMonoFloats(e.audioDecFrame)
+		stereoSamples := monoToStereo(monoSamples)
+		e.audioFIFO.Push(stereoSamples)
+
+		// Process all complete frames in FIFO (same as above)
+		for e.audioFIFO.Available() >= encoderFrameSize*2 {
+			frameSamples := e.audioFIFO.Pop(encoderFrameSize * 2)
+
+			ffmpeg.AVFrameMakeWritable(e.audioEncFrame)
+			writeStereoFloats(e.audioEncFrame, frameSamples)
+
+			e.audioEncFrame.SetPts(e.nextAudioPts)
+			e.nextAudioPts += int64(encoderFrameSize)
+
+			ffmpeg.AVCodecSendFrame(e.audioCodec, e.audioEncFrame)
+
+			for {
+				encodedPkt := ffmpeg.AVPacketAlloc()
+				_, err := ffmpeg.AVCodecReceivePacket(e.audioCodec, encodedPkt)
+				if err != nil || errors.Is(err, ffmpeg.EAgain) || errors.Is(err, ffmpeg.AVErrorEOF) {
+					ffmpeg.AVPacketFree(&encodedPkt)
+					break
+				}
+
+				encodedPkt.SetStreamIndex(e.audioStream.Index())
+				ffmpeg.AVPacketRescaleTs(encodedPkt, e.audioCodec.TimeBase(), e.audioStream.TimeBase())
+				ffmpeg.AVInterleavedWriteFrame(e.formatCtx, encodedPkt)
+				ffmpeg.AVPacketFree(&encodedPkt)
+			}
+		}
+	}
+
+	// Process any remaining samples in FIFO (pad with silence if needed)
+	if e.audioFIFO.Available() > 0 {
+		remaining := e.audioFIFO.Available()
+		needed := encoderFrameSize * 2
+
+		// Pop what we have
+		partialSamples := e.audioFIFO.Pop(remaining)
+
+		// Pad with silence to complete frame
+		paddedSamples := make([]float32, needed)
+		copy(paddedSamples, partialSamples)
+		// Rest is already zero (silence)
+
+		ffmpeg.AVFrameMakeWritable(e.audioEncFrame)
+		writeStereoFloats(e.audioEncFrame, paddedSamples)
+
+		e.audioEncFrame.SetPts(e.nextAudioPts)
+		ffmpeg.AVCodecSendFrame(e.audioCodec, e.audioEncFrame)
+
+		// Flush encoder
 		for {
 			encodedPkt := ffmpeg.AVPacketAlloc()
 			_, err := ffmpeg.AVCodecReceivePacket(e.audioCodec, encodedPkt)
-			if err != nil || errors.Is(err, ffmpeg.EAgain) || errors.Is(err, ffmpeg.AVErrorEOF) {
+			if err != nil || errors.Is(err, ffmpeg.AVErrorEOF) {
 				ffmpeg.AVPacketFree(&encodedPkt)
 				break
 			}
@@ -512,9 +760,9 @@ func (e *Encoder) ProcessAudio() error {
 		}
 	}
 
-	// Flush encoder
+	// Final flush
 	ffmpeg.AVCodecSendFrame(e.audioCodec, nil)
-	
+
 	for {
 		encodedPkt := ffmpeg.AVPacketAlloc()
 		_, err := ffmpeg.AVCodecReceivePacket(e.audioCodec, encodedPkt)
@@ -589,7 +837,7 @@ func (e *Encoder) Close() error {
 	if e.audioEncFrame != nil {
 		ffmpeg.AVFrameFree(&e.audioEncFrame)
 	}
-	
+
 	// Close and free audio input context
 	if e.audioInputCtx != nil {
 		ffmpeg.AVFormatCloseInput(&e.audioInputCtx)
