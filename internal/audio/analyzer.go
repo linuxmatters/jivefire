@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"time"
 
 	"github.com/linuxmatters/jivefire/internal/config"
 )
@@ -41,9 +42,11 @@ type AudioProfile struct {
 	Duration   float64 // Seconds
 }
 
+// ProgressCallback is called with progress updates during analysis
+type ProgressCallback func(frame, totalFrames int, currentRMS, currentPeak float64, barHeights []float64, duration time.Duration)
+
 // AnalyzeAudio performs Pass 1: stream through audio and collect statistics
-func AnalyzeAudio(filename string) (*AudioProfile, error) {
-	fmt.Printf("Pass 1: Analyzing audio...\n")
+func AnalyzeAudio(filename string, progressCb ProgressCallback) (*AudioProfile, error) {
 
 	// Open streaming reader
 	reader, err := NewStreamingReader(filename)
@@ -81,6 +84,8 @@ func AnalyzeAudio(filename string) (*AudioProfile, error) {
 	}
 	copy(fftBuffer, initialChunk)
 
+	startTime := time.Now()
+
 	for frameNum := 0; frameNum < numFrames; frameNum++ {
 		// Use current buffer for FFT (copy to ensure we have full FFTSize)
 		chunk := make([]float64, config.FFTSize)
@@ -99,10 +104,16 @@ func AnalyzeAudio(filename string) (*AudioProfile, error) {
 		}
 		sumRMS += analysis.RMSLevel
 
-		// Progress indicator
-		if frameNum%100 == 0 {
-			progress := float64(frameNum) / float64(numFrames) * 100
-			fmt.Printf("\r  Analyzing: %.1f%%", progress)
+		// Send progress update via callback (throttle to every 3 frames for performance)
+		if progressCb != nil && (frameNum%3 == 0 || frameNum == numFrames-1) {
+			// Convert bar magnitudes to slice for progress update
+			barHeights := make([]float64, config.NumBars)
+			for i := 0; i < config.NumBars; i++ {
+				barHeights[i] = analysis.BarMagnitudes[i]
+			}
+
+			elapsed := time.Since(startTime)
+			progressCb(frameNum+1, numFrames, analysis.RMSLevel, analysis.PeakMagnitude, barHeights, elapsed)
 		}
 
 		// Advance sliding buffer for next frame
@@ -120,8 +131,6 @@ func AnalyzeAudio(filename string) (*AudioProfile, error) {
 			}
 		}
 	}
-
-	fmt.Printf("\r  Analyzing: 100.0%%\n")
 
 	// Calculate global statistics
 	profile.GlobalPeak = maxPeak
@@ -144,14 +153,6 @@ func AnalyzeAudio(filename string) (*AudioProfile, error) {
 		// Fallback to original hardcoded value if no audio detected
 		profile.OptimalBaseScale = 0.0075
 	}
-
-	fmt.Printf("  Audio Profile:\n")
-	fmt.Printf("    Duration:      %.1f seconds\n", profile.Duration)
-	fmt.Printf("    Frames:        %d\n", profile.NumFrames)
-	fmt.Printf("    Global Peak:   %.6f\n", profile.GlobalPeak)
-	fmt.Printf("    Global RMS:    %.6f\n", profile.GlobalRMS)
-	fmt.Printf("    Dynamic Range: %.2f\n", profile.DynamicRange)
-	fmt.Printf("    Optimal Scale: %.6f\n", profile.OptimalBaseScale)
 
 	return profile, nil
 }

@@ -9,10 +9,12 @@ import (
 	"time"
 
 	"github.com/alecthomas/kong"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/linuxmatters/jivefire/internal/audio"
 	"github.com/linuxmatters/jivefire/internal/config"
 	"github.com/linuxmatters/jivefire/internal/encoder"
 	"github.com/linuxmatters/jivefire/internal/renderer"
+	"github.com/linuxmatters/jivefire/internal/ui"
 )
 
 const version = "0.0.1"
@@ -79,9 +81,52 @@ func generateVideo(inputFile string, outputFile string) {
 	// ============================================================================
 	// PASS 1: Analyze audio to calculate optimal parameters
 	// ============================================================================
-	profile, err := audio.AnalyzeAudio(inputFile)
-	if err != nil {
-		fmt.Printf("Error analyzing audio: %v\n", err)
+
+	// Create Bubbletea program for Pass 1
+	model := ui.NewPass1Model()
+	p := tea.NewProgram(model)
+
+	// Run analysis in a goroutine and send progress updates
+	var profile *audio.AudioProfile
+	var analysisErr error
+
+	go func() {
+		profile, analysisErr = audio.AnalyzeAudio(inputFile, func(frame, totalFrames int, currentRMS, currentPeak float64, barHeights []float64, duration time.Duration) {
+			// Send progress update to Bubbletea
+			p.Send(ui.Pass1Progress{
+				Frame:       frame,
+				TotalFrames: totalFrames,
+				CurrentRMS:  currentRMS,
+				CurrentPeak: currentPeak,
+				BarHeights:  barHeights,
+				Duration:    duration,
+			})
+		})
+
+		// Send completion message
+		if analysisErr == nil {
+			p.Send(ui.Pass1Complete{
+				PeakMagnitude: profile.GlobalPeak,
+				RMSLevel:      profile.GlobalRMS,
+				DynamicRange:  profile.DynamicRange,
+				Duration:      time.Duration(float64(time.Second) * profile.Duration),
+				OptimalScale:  profile.OptimalBaseScale,
+			})
+		} else {
+			// On error, just quit the program
+			p.Quit()
+		}
+	}()
+
+	// Run the Bubbletea UI
+	if _, err := p.Run(); err != nil {
+		fmt.Printf("Error running UI: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Check for analysis errors
+	if analysisErr != nil {
+		fmt.Printf("Error analyzing audio: %v\n", analysisErr)
 		os.Exit(1)
 	}
 
