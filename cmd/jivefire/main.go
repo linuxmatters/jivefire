@@ -66,7 +66,7 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf("Loaded %d samples\n", len(samples))
-		
+
 		generateSnapshot(samples, outputFile, snapshotTime)
 		return
 	}
@@ -169,16 +169,23 @@ func generateVideo(inputFile string, outputFile string) {
 	// Auto-sensitivity adjustment (CAVA-style)
 	sensitivity := 1.0
 
+	// Sliding buffer for FFT: we read samplesPerFrame but need FFTSize for FFT
+	samplesPerFrame := config.SampleRate / config.FPS
+	fftBuffer := make([]float64, config.FFTSize)
+
+	// Pre-fill buffer with first chunk
+	initialChunk, err := reader.ReadChunk(config.FFTSize)
+	if err != nil {
+		fmt.Printf("\nError reading initial audio chunk: %v\n", err)
+		stdin.Close()
+		cmd.Wait()
+		os.Exit(1)
+	}
+	copy(fftBuffer, initialChunk)
+
 	for frameNum := 0; frameNum < numFrames; frameNum++ {
-		// Read next chunk from streaming reader
-		chunk, err := reader.ReadChunk(config.FFTSize)
-		if err == io.EOF {
-			break // End of audio
-		}
-		if err != nil {
-			fmt.Printf("\nError reading audio chunk: %v\n", err)
-			break
-		}
+		// Use current buffer for FFT
+		chunk := fftBuffer[:config.FFTSize]
 
 		// Compute FFT
 		t0 := time.Now()
@@ -271,6 +278,23 @@ func generateVideo(inputFile string, outputFile string) {
 
 		if frameNum%30 == 0 {
 			fmt.Printf("\rFrame %d/%d", frameNum, numFrames)
+		}
+
+		// Advance sliding buffer for next frame
+		// Read samplesPerFrame new samples and shift buffer
+		if frameNum < numFrames-1 { // Don't read past end
+			newSamples, err := reader.ReadChunk(samplesPerFrame)
+			if err == io.EOF {
+				break // Unexpected EOF
+			}
+			if err != nil {
+				fmt.Printf("\nError reading audio: %v\n", err)
+				break
+			}
+
+			// Shift buffer left by samplesPerFrame, append new samples
+			copy(fftBuffer, fftBuffer[samplesPerFrame:])
+			copy(fftBuffer[config.FFTSize-samplesPerFrame:], newSamples)
 		}
 	}
 

@@ -71,22 +71,20 @@ func AnalyzeAudio(filename string) (*AudioProfile, error) {
 	var sumRMS float64
 	var maxPeak float64
 
-	for frameNum := 0; frameNum < numFrames; frameNum++ {
-		// Read chunk for FFT (need FFTSize samples)
-		chunk, err := reader.ReadChunk(config.FFTSize)
-		if err == io.EOF {
-			break // End of audio
-		}
-		if err != nil {
-			return nil, fmt.Errorf("error reading chunk at frame %d: %w", frameNum, err)
-		}
+	// Sliding buffer for FFT: we advance by samplesPerFrame but need FFTSize for FFT
+	fftBuffer := make([]float64, config.FFTSize)
 
-		// Pad if needed
-		if len(chunk) < config.FFTSize {
-			padded := make([]float64, config.FFTSize)
-			copy(padded, chunk)
-			chunk = padded
-		}
+	// Pre-fill buffer with first chunk
+	initialChunk, err := reader.ReadChunk(config.FFTSize)
+	if err != nil {
+		return nil, fmt.Errorf("error reading initial chunk: %w", err)
+	}
+	copy(fftBuffer, initialChunk)
+
+	for frameNum := 0; frameNum < numFrames; frameNum++ {
+		// Use current buffer for FFT (copy to ensure we have full FFTSize)
+		chunk := make([]float64, config.FFTSize)
+		copy(chunk, fftBuffer)
 
 		// Compute FFT
 		coeffs := processor.ProcessChunk(chunk)
@@ -107,11 +105,19 @@ func AnalyzeAudio(filename string) (*AudioProfile, error) {
 			fmt.Printf("\r  Analyzing: %.1f%%", progress)
 		}
 
-		// Advance to next frame position
-		// Skip ahead by samplesPerFrame - FFTSize (since we already read FFTSize)
-		skipSamples := samplesPerFrame - config.FFTSize
-		if skipSamples > 0 {
-			_, _ = reader.ReadChunk(skipSamples)
+		// Advance sliding buffer for next frame
+		// Read samplesPerFrame new samples and shift buffer
+		if frameNum < numFrames-1 { // Don't read past end
+			newSamples, err := reader.ReadChunk(samplesPerFrame)
+			if err != nil && err != io.EOF {
+				return nil, fmt.Errorf("error reading audio at frame %d: %w", frameNum, err)
+			}
+
+			// Shift buffer left by samplesPerFrame, append new samples
+			copy(fftBuffer, fftBuffer[samplesPerFrame:])
+			if len(newSamples) > 0 {
+				copy(fftBuffer[config.FFTSize-samplesPerFrame:], newSamples)
+			}
 		}
 	}
 
