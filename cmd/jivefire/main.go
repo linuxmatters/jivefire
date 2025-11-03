@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"image"
 	"image/png"
 	"io"
 	"math"
@@ -328,6 +329,12 @@ func generateVideo(inputFile string, outputFile string) {
 			totalWrite += time.Since(t0)
 
 			// Send progress update every 3 frames
+			// Send frame data for preview every 6 frames (5Hz at 30fps - good balance)
+			var frameData *image.RGBA
+			if frameNum%6 == 0 {
+				frameData = img
+			}
+
 			if frameNum%3 == 0 {
 				elapsed := time.Since(renderStartTime)
 
@@ -348,7 +355,7 @@ func generateVideo(inputFile string, outputFile string) {
 					BarHeights:  barHeightsCopy,
 					FileSize:    estimatedSize,
 					Sensitivity: sensitivity,
-					FrameData:   img, // Send current frame for video preview
+					FrameData:   frameData, // Send frame every 6 frames for preview
 				})
 			}
 

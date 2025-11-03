@@ -1,9 +1,9 @@
 package ui
 
 import (
-	"fmt"
 	"image"
 	"image/color"
+	"strings"
 )
 
 // PreviewConfig holds configuration for the video preview
@@ -34,6 +34,11 @@ func DownsampleFrame(frame *image.RGBA, config PreviewConfig) [][]color.RGBA {
 	cellHeight := srcHeight / config.Height
 
 	preview := make([][]color.RGBA, config.Height)
+
+	// Direct access to underlying pixel data for faster iteration
+	stride := frame.Stride
+	pix := frame.Pix
+
 	for row := 0; row < config.Height; row++ {
 		preview[row] = make([]color.RGBA, config.Width)
 		for col := 0; col < config.Width; col++ {
@@ -43,26 +48,29 @@ func DownsampleFrame(frame *image.RGBA, config PreviewConfig) [][]color.RGBA {
 
 			// Average all pixels in this cell region for better quality
 			var sumR, sumG, sumB uint32
-			pixelCount := 0
+			pixelCount := uint32(0)
 
 			for y := srcY; y < srcY+cellHeight && y < srcHeight; y++ {
-				for x := srcX; x < srcX+cellWidth && x < srcWidth; x++ {
-					r, g, b, _ := frame.At(x, y).RGBA()
-					// RGBA() returns 16-bit values, convert to 8-bit
-					sumR += uint32(r >> 8)
-					sumG += uint32(g >> 8)
-					sumB += uint32(b >> 8)
+				// Calculate offset to start of row in pixel buffer
+				offset := y*stride + srcX*4
+				for x := 0; x < cellWidth && srcX+x < srcWidth; x++ {
+					// Direct access to RGBA bytes (much faster than frame.At())
+					sumR += uint32(pix[offset])
+					sumG += uint32(pix[offset+1])
+					sumB += uint32(pix[offset+2])
+					offset += 4
 					pixelCount++
 				}
 			}
 
 			// Calculate average RGB values
 			if pixelCount > 0 {
-				avgR := uint8(sumR / uint32(pixelCount))
-				avgG := uint8(sumG / uint32(pixelCount))
-				avgB := uint8(sumB / uint32(pixelCount))
-
-				preview[row][col] = color.RGBA{R: avgR, G: avgG, B: avgB, A: 255}
+				preview[row][col] = color.RGBA{
+					R: uint8(sumR / pixelCount),
+					G: uint8(sumG / pixelCount),
+					B: uint8(sumB / pixelCount),
+					A: 255,
+				}
 			}
 		}
 	}
@@ -77,28 +85,65 @@ func RenderPreview(preview [][]color.RGBA) string {
 		return ""
 	}
 
-	// Build the preview string using ANSI 24-bit RGB background colors
-	// Format: \x1b[48;2;R;G;Bm for background color, space character as pixel, \x1b[0m to reset
-	var result string
+	// Pre-allocate string builder for efficiency
+	var builder strings.Builder
+	// Estimate: ~20 bytes per pixel (ANSI escape) + borders
+	builder.Grow(len(preview) * len(preview[0]) * 20)
 
 	// Top border
-	result += "  Video Preview:\n"
-	result += "  ┌" + repeat("─", len(preview[0])) + "┐\n"
+	builder.WriteString("  Video Preview:\n  ┌")
+	builder.WriteString(strings.Repeat("─", len(preview[0])))
+	builder.WriteString("┐\n")
+
+	// Pre-allocate buffer for color escape codes
+	colorBuf := make([]byte, 0, 32)
 
 	// Render each row with true color
 	for _, row := range preview {
-		result += "  │"
+		builder.WriteString("  │")
 		for _, pixel := range row {
-			// ANSI escape: \x1b[48;2;R;G;Bm sets 24-bit RGB background color
-			result += fmt.Sprintf("\x1b[48;2;%d;%d;%dm \x1b[0m", pixel.R, pixel.G, pixel.B)
+			// Build ANSI escape manually (faster than fmt.Sprintf)
+			colorBuf = colorBuf[:0]
+			colorBuf = append(colorBuf, "\x1b[48;2;"...)
+			colorBuf = appendInt(colorBuf, int(pixel.R))
+			colorBuf = append(colorBuf, ';')
+			colorBuf = appendInt(colorBuf, int(pixel.G))
+			colorBuf = append(colorBuf, ';')
+			colorBuf = appendInt(colorBuf, int(pixel.B))
+			colorBuf = append(colorBuf, "m \x1b[0m"...)
+			builder.Write(colorBuf)
 		}
-		result += "│\n"
+		builder.WriteString("│\n")
 	}
 
 	// Bottom border
-	result += "  └" + repeat("─", len(preview[0])) + "┘\n"
+	builder.WriteString("  └")
+	builder.WriteString(strings.Repeat("─", len(preview[0])))
+	builder.WriteString("┘\n")
 
-	return result
+	return builder.String()
+}
+
+// appendInt appends integer to byte slice without allocation (faster than strconv.Itoa)
+func appendInt(buf []byte, n int) []byte {
+	if n == 0 {
+		return append(buf, '0')
+	}
+
+	// Handle numbers up to 255 (max RGB value)
+	if n >= 100 {
+		buf = append(buf, byte('0'+n/100))
+		n %= 100
+		buf = append(buf, byte('0'+n/10))
+		buf = append(buf, byte('0'+n%10))
+	} else if n >= 10 {
+		buf = append(buf, byte('0'+n/10))
+		buf = append(buf, byte('0'+n%10))
+	} else {
+		buf = append(buf, byte('0'+n))
+	}
+
+	return buf
 }
 
 // repeat creates a string by repeating s n times

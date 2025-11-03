@@ -51,6 +51,8 @@ type pass2Model struct {
 	minDisplayTime  time.Duration // Minimum time to show UI
 	completionDelay time.Duration // Time to show completion screen
 	quitting        bool          // Flag to indicate we're in quit delay
+	cachedPreview   string        // Cached rendered preview string
+	cachedFrameNum  int           // Frame number of cached preview
 }
 
 // NewPass2Model creates a new Pass 2 UI model
@@ -207,12 +209,18 @@ func (m *pass2Model) renderProgress() string {
 		s.WriteString(spectrum)
 		s.WriteString("\n\n")
 
-		// Video preview (if frame data available)
-		if m.lastUpdate.FrameData != nil {
+		// Video preview - regenerate if new frame data available, otherwise use cached
+		if m.lastUpdate.FrameData != nil && m.lastUpdate.Frame != m.cachedFrameNum {
+			// New frame data available, regenerate preview
 			config := DefaultPreviewConfig()
 			preview := DownsampleFrame(m.lastUpdate.FrameData, config)
-			previewStr := RenderPreview(preview)
-			s.WriteString(previewStr)
+			m.cachedPreview = RenderPreview(preview)
+			m.cachedFrameNum = m.lastUpdate.Frame
+		}
+
+		// Always display cached preview once we have one (prevents flickering)
+		if m.cachedPreview != "" {
+			s.WriteString(m.cachedPreview)
 			s.WriteString("\n")
 		}
 	}
