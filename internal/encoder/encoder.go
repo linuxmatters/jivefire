@@ -460,7 +460,7 @@ func (e *Encoder) WriteFrame(rgbData []byte) error {
 	}
 
 	// Convert RGB to YUV420p using stdlib-optimized implementation
-	if err := convertRGBToYUVStdlibOptimized(rgbData, yuvFrame, e.config.Width, e.config.Height); err != nil {
+	if err := convertRGBToYUV(rgbData, yuvFrame, e.config.Width, e.config.Height); err != nil {
 		return fmt.Errorf("RGB to YUV conversion failed: %w", err)
 	}
 
