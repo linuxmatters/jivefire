@@ -285,18 +285,18 @@ func (e *Encoder) initializeAudio() error {
 	sampleFmt := e.audioDecoder.SampleFmt()
 	channels := e.audioDecoder.Channels()
 	sampleRate := e.audioDecoder.SampleRate()
-	
+
 	// Log the decoder's output format
 	fmt.Printf("Audio input: format=%d, sample_rate=%dHz, channels=%d\n", sampleFmt, sampleRate, channels)
 
 	// Check if we support this sample format
 	supportedFormats := map[int32]string{
 		1: "16-bit signed integer",
-		3: "32-bit float", 
+		3: "32-bit float",
 		6: "16-bit signed integer planar",
 		8: "32-bit float planar",
 	}
-	
+
 	sampleFmtInt := int32(sampleFmt)
 	if _, ok := supportedFormats[sampleFmtInt]; !ok {
 		// Provide helpful format names for common unsupported formats
@@ -318,9 +318,9 @@ func (e *Encoder) initializeAudio() error {
 		return fmt.Errorf("unsupported audio format: %s (format %d). Supported formats: 16-bit PCM and 32-bit float", formatName, sampleFmtInt)
 	}
 
-	// Check channel count - we only support mono input
-	if channels != 1 {
-		return fmt.Errorf("unsupported channel count: %d (only mono input is supported)", channels)
+	// Check channel count - we support mono and stereo input
+	if channels != 1 && channels != 2 {
+		return fmt.Errorf("unsupported channel count: %d (only mono and stereo input are supported)", channels)
 	}
 
 	// Check sample rate is reasonable
@@ -530,51 +530,153 @@ func monoToStereo(mono []float32) []float32 {
 	return stereo
 }
 
-// extractMonoFloats extracts float samples from a decoded frame
-func extractMonoFloats(frame *ffmpeg.AVFrame) ([]float32, error) {
+// extractFloatsWithDownmix extracts audio samples from a frame and downmixes stereo to mono if needed
+func extractFloatsWithDownmix(frame *ffmpeg.AVFrame, channels int) ([]float32, error) {
 	// Get frame properties
 	nbSamples := frame.NbSamples()
 	sampleFormat := frame.Format()
 
-	// Get first channel data pointer using .Get() method
-	dataPtr := frame.Data().Get(0)
-	if dataPtr == nil {
-		return nil, fmt.Errorf("no data in first channel")
-	}
-
 	samples := make([]float32, nbSamples)
 
-	// Check the sample format and convert accordingly
-	// AVSampleFmtS16 = 1 (signed 16-bit)
-	// AVSampleFmtFlt = 3 (float)
+	// Check the sample format
+	// AVSampleFmtS16 = 1 (signed 16-bit interleaved)
+	// AVSampleFmtFlt = 3 (float interleaved)
 	// AVSampleFmtS16P = 6 (signed 16-bit planar)
 	// AVSampleFmtFltp = 8 (float planar)
 
-	switch sampleFormat {
-	case 1: // AVSampleFmtS16 - interleaved 16-bit signed
-		// Convert to byte slice for reading 16-bit samples
-		dataSlice := (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[: nbSamples*2 : nbSamples*2]
-		for i := 0; i < nbSamples; i++ {
-			// Read 16-bit signed integer (little-endian)
-			val := int16(dataSlice[i*2]) | int16(dataSlice[i*2+1])<<8
-			// Convert to float32 in range [-1.0, 1.0]
-			samples[i] = float32(val) / 32768.0
+	// Determine if format is planar
+	isPlanar := sampleFormat >= 5 // Planar formats start at 5
+
+	if isPlanar && channels == 2 {
+		// For planar stereo, we have separate buffers for left and right
+		leftPtr := frame.Data().Get(0)
+		rightPtr := frame.Data().Get(1)
+		if leftPtr == nil || rightPtr == nil {
+			return nil, fmt.Errorf("missing channel data")
 		}
 
-	case 3, 8: // AVSampleFmtFlt or AVSampleFmtFltp - float format
-		// Convert to byte slice for reading float32 samples
-		dataSlice := (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[: nbSamples*4 : nbSamples*4]
-		for i := 0; i < nbSamples; i++ {
-			// Read 4 bytes as float32 (little-endian)
-			bits := uint32(dataSlice[i*4]) |
-				uint32(dataSlice[i*4+1])<<8 |
-				uint32(dataSlice[i*4+2])<<16 |
-				uint32(dataSlice[i*4+3])<<24
-			samples[i] = *(*float32)(unsafe.Pointer(&bits))
+		switch sampleFormat {
+		case 6: // AVSampleFmtS16P - planar 16-bit signed
+			leftSlice := (*[1 << 30]byte)(unsafe.Pointer(leftPtr))[: nbSamples*2 : nbSamples*2]
+			rightSlice := (*[1 << 30]byte)(unsafe.Pointer(rightPtr))[: nbSamples*2 : nbSamples*2]
+			for i := 0; i < nbSamples; i++ {
+				// Read left channel
+				leftVal := int16(leftSlice[i*2]) | int16(leftSlice[i*2+1])<<8
+				// Read right channel
+				rightVal := int16(rightSlice[i*2]) | int16(rightSlice[i*2+1])<<8
+				// Average and convert to float32
+				samples[i] = (float32(leftVal) + float32(rightVal)) / (2 * 32768.0)
+			}
+
+		case 8: // AVSampleFmtFltp - planar float
+			leftSlice := (*[1 << 30]byte)(unsafe.Pointer(leftPtr))[: nbSamples*4 : nbSamples*4]
+			rightSlice := (*[1 << 30]byte)(unsafe.Pointer(rightPtr))[: nbSamples*4 : nbSamples*4]
+			for i := 0; i < nbSamples; i++ {
+				// Read left channel float
+				leftBits := uint32(leftSlice[i*4]) |
+					uint32(leftSlice[i*4+1])<<8 |
+					uint32(leftSlice[i*4+2])<<16 |
+					uint32(leftSlice[i*4+3])<<24
+				leftFloat := *(*float32)(unsafe.Pointer(&leftBits))
+
+				// Read right channel float
+				rightBits := uint32(rightSlice[i*4]) |
+					uint32(rightSlice[i*4+1])<<8 |
+					uint32(rightSlice[i*4+2])<<16 |
+					uint32(rightSlice[i*4+3])<<24
+				rightFloat := *(*float32)(unsafe.Pointer(&rightBits))
+
+				// Average
+				samples[i] = (leftFloat + rightFloat) / 2
+			}
+
+		default:
+			return nil, fmt.Errorf("unsupported planar sample format: %d", sampleFormat)
+		}
+	} else {
+		// Interleaved or mono formats
+		dataPtr := frame.Data().Get(0)
+		if dataPtr == nil {
+			return nil, fmt.Errorf("no data in first channel")
 		}
 
-	default:
-		return nil, fmt.Errorf("unsupported sample format: %d", sampleFormat)
+		switch sampleFormat {
+		case 1: // AVSampleFmtS16 - interleaved 16-bit signed
+			if channels == 1 {
+				// Mono
+				dataSlice := (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[: nbSamples*2 : nbSamples*2]
+				for i := 0; i < nbSamples; i++ {
+					val := int16(dataSlice[i*2]) | int16(dataSlice[i*2+1])<<8
+					samples[i] = float32(val) / 32768.0
+				}
+			} else {
+				// Stereo interleaved: L R L R L R ...
+				dataSlice := (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[: nbSamples*channels*2 : nbSamples*channels*2]
+				for i := 0; i < nbSamples; i++ {
+					// Read left channel
+					leftVal := int16(dataSlice[i*4]) | int16(dataSlice[i*4+1])<<8
+					// Read right channel
+					rightVal := int16(dataSlice[i*4+2]) | int16(dataSlice[i*4+3])<<8
+					// Average and convert
+					samples[i] = (float32(leftVal) + float32(rightVal)) / (2 * 32768.0)
+				}
+			}
+
+		case 3: // AVSampleFmtFlt - interleaved float
+			if channels == 1 {
+				// Mono
+				dataSlice := (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[: nbSamples*4 : nbSamples*4]
+				for i := 0; i < nbSamples; i++ {
+					bits := uint32(dataSlice[i*4]) |
+						uint32(dataSlice[i*4+1])<<8 |
+						uint32(dataSlice[i*4+2])<<16 |
+						uint32(dataSlice[i*4+3])<<24
+					samples[i] = *(*float32)(unsafe.Pointer(&bits))
+				}
+			} else {
+				// Stereo interleaved
+				dataSlice := (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[: nbSamples*channels*4 : nbSamples*channels*4]
+				for i := 0; i < nbSamples; i++ {
+					// Read left channel
+					leftBits := uint32(dataSlice[i*8]) |
+						uint32(dataSlice[i*8+1])<<8 |
+						uint32(dataSlice[i*8+2])<<16 |
+						uint32(dataSlice[i*8+3])<<24
+					leftFloat := *(*float32)(unsafe.Pointer(&leftBits))
+
+					// Read right channel
+					rightBits := uint32(dataSlice[i*8+4]) |
+						uint32(dataSlice[i*8+5])<<8 |
+						uint32(dataSlice[i*8+6])<<16 |
+						uint32(dataSlice[i*8+7])<<24
+					rightFloat := *(*float32)(unsafe.Pointer(&rightBits))
+
+					// Average
+					samples[i] = (leftFloat + rightFloat) / 2
+				}
+			}
+
+		// For mono planar formats (6, 8), just treat as mono
+		case 6: // AVSampleFmtS16P - planar 16-bit (mono)
+			dataSlice := (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[: nbSamples*2 : nbSamples*2]
+			for i := 0; i < nbSamples; i++ {
+				val := int16(dataSlice[i*2]) | int16(dataSlice[i*2+1])<<8
+				samples[i] = float32(val) / 32768.0
+			}
+
+		case 8: // AVSampleFmtFltp - planar float (mono)
+			dataSlice := (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[: nbSamples*4 : nbSamples*4]
+			for i := 0; i < nbSamples; i++ {
+				bits := uint32(dataSlice[i*4]) |
+					uint32(dataSlice[i*4+1])<<8 |
+					uint32(dataSlice[i*4+2])<<16 |
+					uint32(dataSlice[i*4+3])<<24
+				samples[i] = *(*float32)(unsafe.Pointer(&bits))
+			}
+
+		default:
+			return nil, fmt.Errorf("unsupported sample format: %d", sampleFormat)
+		}
 	}
 
 	return samples, nil
@@ -657,11 +759,12 @@ func (e *Encoder) ProcessAudio() error {
 				return fmt.Errorf("failed to receive audio frame from decoder: %w", err)
 			}
 
-			// Extract mono float samples from decoded frame
-			monoSamples, err := extractMonoFloats(e.audioDecFrame)
+			// Extract float samples from decoded frame (with downmix if stereo)
+			channels := e.audioDecoder.Channels()
+			monoSamples, err := extractFloatsWithDownmix(e.audioDecFrame, channels)
 			if err != nil {
 				ffmpeg.AVPacketUnref(e.audioPacket)
-				return fmt.Errorf("failed to extract mono samples: %w", err)
+				return fmt.Errorf("failed to extract samples: %w", err)
 			}
 
 			// Convert mono to stereo
@@ -736,7 +839,8 @@ func (e *Encoder) ProcessAudio() error {
 		}
 
 		// Extract and process same as above
-		monoSamples, _ := extractMonoFloats(e.audioDecFrame)
+		channels := e.audioDecoder.Channels()
+		monoSamples, _ := extractFloatsWithDownmix(e.audioDecFrame, channels)
 		stereoSamples := monoToStereo(monoSamples)
 		e.audioFIFO.Push(stereoSamples)
 

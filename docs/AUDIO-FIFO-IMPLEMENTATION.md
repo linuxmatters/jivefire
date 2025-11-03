@@ -10,8 +10,9 @@ This document describes the pure Go audio FIFO (First In, First Out) buffer impl
 
 - **Decoder output**: 2048 samples per frame (typical for WAV files)
 - **AAC encoder requirement**: Exactly 1024 samples per frame
-- **Channel mismatch**: Input is mono, AAC encoder requires stereo
+- **Channel mismatch**: Input can be mono or stereo, AAC encoder requires stereo
 - **Sample format**: WAV files may contain 16-bit integers or 32-bit floats, but the encoder expects float32
+- **Stereo handling**: Stereo inputs are automatically downmixed to mono for visualization
 
 ### Why Pure Go?
 
@@ -62,9 +63,9 @@ Returns the current number of samples in the buffer.
 
 ### Audio Processing Pipeline
 
-1. **Decode audio frame** (2048 mono samples)
-2. **Extract and convert samples** to float32
-3. **Push to FIFO buffer**
+1. **Decode audio frame** (2048 samples, mono or stereo)
+2. **Extract and convert samples** to float32 (with stereo downmix if needed)
+3. **Push to FIFO buffer** (now contains mono samples)
 4. **Pop exactly 1024 samples** when available
 5. **Convert mono to stereo** (duplicate each sample)
 6. **Encode with AAC**
@@ -83,6 +84,22 @@ case 3: // AVSampleFmtFlt - 32-bit float
     samples[i] = math.Float32frombits(binary.LittleEndian.Uint32(data[i*4:]))
 }
 ```
+
+### Stereo to Mono Downmixing
+
+When stereo input is provided, the implementation automatically downmixes to mono using a simple average:
+
+```go
+// For interleaved stereo (L R L R...)
+leftVal := int16(data[i*4]) | int16(data[i*4+1])<<8
+rightVal := int16(data[i*4+2]) | int16(data[i*4+3])<<8
+samples[i] = (float32(leftVal) + float32(rightVal)) / (2 * 32768.0)
+
+// For planar stereo (separate L and R buffers)
+samples[i] = (leftFloat + rightFloat) / 2
+```
+
+This ensures that stereo audio files work seamlessly with the visualizer, which is designed for mono analysis.
 
 ### Mono to Stereo Conversion
 
@@ -108,13 +125,14 @@ The implementation includes comprehensive validation:
 - **Sample Format 8**: 32-bit float planar
 
 ### Requirements
-- **Channels**: Mono only (1 channel)
+- **Channels**: Mono or stereo (1 or 2 channels)
 - **Sample Rate**: 8,000 Hz to 192,000 Hz
+- **Note**: Stereo inputs are automatically downmixed to mono
 
 ### Error Messages
 The validator provides user-friendly error messages:
 - "unsupported audio format: 8-bit unsigned (format 0). Supported formats: 16-bit PCM and 32-bit float"
-- "unsupported channel count: 2 (only mono input is supported)"
+- "unsupported channel count: 5 (only mono or stereo input is supported)"
 - "unsupported sample rate: 4000Hz (must be between 8kHz and 192kHz)"
 
 ## Performance Characteristics

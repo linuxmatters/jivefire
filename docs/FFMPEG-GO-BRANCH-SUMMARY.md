@@ -7,7 +7,7 @@ The `ffmpeg-go` branch represents a major architectural improvement to Jivefire,
 ## Phases Completed
 
 ### Phase 1: Core Integration ✅
-**Goal**: Replace stdin pipe with direct H.264 encoding  
+**Goal**: Replace stdin pipe with direct H.264 encoding
 **Status**: Completed November 2, 2025
 
 Key achievements:
@@ -16,7 +16,7 @@ Key achievements:
 - 8.85x faster than FFmpeg pipe approach
 - Comprehensive test coverage
 
-### Phase 2A: Video Pipeline ✅  
+### Phase 2A: Video Pipeline ✅
 **Goal**: Integrate encoder into Jivefire's 2-pass workflow
 **Status**: Completed November 3, 2025
 
@@ -69,7 +69,7 @@ Automatic detection and conversion of audio formats:
 - `internal/encoder/` - Core encoder with audio/video
 - `internal/encoder/frame.go` - YUV420 frame wrapper
 
-### Documentation  
+### Documentation
 - `docs/PHASE1-COMPLETION.md` - Phase 1 details
 - `docs/PHASE2-COMPLETION.md` - Phase 2A details
 - `docs/PHASE2B-COMPLETION.md` - Phase 2B details
@@ -108,7 +108,7 @@ Automatic detection and conversion of audio formats:
 - Proper colorspace conversion (RGB→YUV420)
 - Correct timestamps and frame ordering
 
-### Audio Quality  
+### Audio Quality
 - Clear, synchronized audio output
 - Proper AAC encoding parameters
 - Handles common WAV formats
@@ -123,7 +123,7 @@ Automatic detection and conversion of audio formats:
 From 71.8 second test file:
 ```
 FFT computation:    1.0%
-Bar binning:        0.0%  
+Bar binning:        0.0%
 Frame drawing:     12.6%
 Video encoding:    73.5%
 Total time:        13.06s
