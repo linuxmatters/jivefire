@@ -2,3 +2,5 @@
 *.mp4
 *.wav
 visualizer
+testdata/snapshot.png
+testdata/test.mp4

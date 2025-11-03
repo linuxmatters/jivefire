@@ -119,6 +119,17 @@ FFmpeg: Encode video + mux audio
 
 ## Build
 
+### Using Just (Recommended)
+
+```bash
+just build              # Build the visualizer binary
+just snapshot           # Generate snapshot at 10s mark → testdata/snapshot.png
+just video              # Render testdata/dream.wav → testdata/test.mp4
+just clean              # Remove build artifacts
+```
+
+### Manual Build
+
 ```bash
 go mod tidy
 go build -o visualizer ./cmd/visualizer
@@ -129,9 +140,9 @@ go build -o visualizer ./cmd/visualizer
 ```
 .
 ├── cmd/
-│   └── visualizer/       # Main application entry point
+│   └── visualizer/      # Main application entry point
 │       └── main.go
-├── internal/             # Private application code
+├── internal/            # Private application code
 │   ├── audio/           # Audio processing
 │   │   ├── reader.go    # WAV file reading
 │   │   └── fft.go       # FFT analysis and binning

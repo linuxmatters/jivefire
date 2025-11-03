@@ -31,7 +31,7 @@ const (
 
 // CAVA algorithm constants
 const (
-	Framerate       = 30.0
-	NoiseReduction  = 0.77  // CAVA default integral smoothing
-	FallAccel       = 0.028 // CAVA gravity acceleration constant
+	Framerate      = 30.0
+	NoiseReduction = 0.77  // CAVA default integral smoothing
+	FallAccel      = 0.028 // CAVA gravity acceleration constant
 )

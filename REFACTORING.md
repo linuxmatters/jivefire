@@ -81,7 +81,13 @@ visualizer-go/
 ## Build & Run
 
 ```bash
-# Build
+# Using just (recommended)
+just build                                    # Build binary
+just snapshot                                 # Quick 10s snapshot → testdata/snapshot.png
+just video                                    # Full render → testdata/test.mp4
+just run testdata/dream.wav output.mp4       # Custom input/output
+
+# Manual build
 go build -o visualizer ./cmd/visualizer
 
 # Run
