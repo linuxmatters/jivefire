@@ -348,6 +348,7 @@ func generateVideo(inputFile string, outputFile string) {
 					BarHeights:  barHeightsCopy,
 					FileSize:    estimatedSize,
 					Sensitivity: sensitivity,
+					FrameData:   img, // Send current frame for video preview
 				})
 			}
 

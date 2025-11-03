@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"image"
 	"strings"
 	"time"
 
@@ -16,8 +17,9 @@ type Pass2Progress struct {
 	TotalFrames int
 	Elapsed     time.Duration
 	BarHeights  []float64
-	FileSize    int64   // Estimated current file size in bytes
-	Sensitivity float64 // Current sensitivity value
+	FileSize    int64       // Estimated current file size in bytes
+	Sensitivity float64     // Current sensitivity value
+	FrameData   *image.RGBA // Current frame RGB data for video preview (optional)
 }
 
 // Pass2Complete signals completion of Pass 2
@@ -204,6 +206,15 @@ func (m *pass2Model) renderProgress() string {
 		// Mirror for stereo effect (even though it's mono)
 		s.WriteString(spectrum)
 		s.WriteString("\n\n")
+
+		// Video preview (if frame data available)
+		if m.lastUpdate.FrameData != nil {
+			config := DefaultPreviewConfig()
+			preview := DownsampleFrame(m.lastUpdate.FrameData, config)
+			previewStr := RenderPreview(preview)
+			s.WriteString(previewStr)
+			s.WriteString("\n")
+		}
 	}
 
 	// Bottom stats line
