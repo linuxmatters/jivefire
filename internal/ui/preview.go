@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 )
@@ -12,18 +13,18 @@ type PreviewConfig struct {
 }
 
 // DefaultPreviewConfig returns a sensible default preview size
-// Using 80x24 to fit nicely in the UI while maintaining 16:9-ish aspect ratio
+// Using 72x20 1.8:1 (slightly wider than 16:9 but very close)
 func DefaultPreviewConfig() PreviewConfig {
 	return PreviewConfig{
-		Width:  80,
-		Height: 24,
+		Width:  72,
+		Height: 20,
 	}
 }
 
 // DownsampleFrame takes a full-resolution RGB frame and downsamples it to preview size
 // Each terminal cell represents a rectangular region of the source image
 // Averages all pixels in each region for smooth, high-quality downsampling
-func DownsampleFrame(frame *image.RGBA, config PreviewConfig) [][]color.Gray {
+func DownsampleFrame(frame *image.RGBA, config PreviewConfig) [][]color.RGBA {
 	bounds := frame.Bounds()
 	srcWidth := bounds.Dx()
 	srcHeight := bounds.Dy()
@@ -32,9 +33,9 @@ func DownsampleFrame(frame *image.RGBA, config PreviewConfig) [][]color.Gray {
 	cellWidth := srcWidth / config.Width
 	cellHeight := srcHeight / config.Height
 
-	preview := make([][]color.Gray, config.Height)
+	preview := make([][]color.RGBA, config.Height)
 	for row := 0; row < config.Height; row++ {
-		preview[row] = make([]color.Gray, config.Width)
+		preview[row] = make([]color.RGBA, config.Width)
 		for col := 0; col < config.Width; col++ {
 			// Calculate the region of the source image this cell represents
 			srcX := col * cellWidth
@@ -61,9 +62,7 @@ func DownsampleFrame(frame *image.RGBA, config PreviewConfig) [][]color.Gray {
 				avgG := uint8(sumG / uint32(pixelCount))
 				avgB := uint8(sumB / uint32(pixelCount))
 
-				// Convert to grayscale using luminance formula
-				gray := rgbToGrayscale(avgR, avgG, avgB)
-				preview[row][col] = color.Gray{Y: gray}
+				preview[row][col] = color.RGBA{R: avgR, G: avgG, B: avgB, A: 255}
 			}
 		}
 	}
@@ -71,37 +70,27 @@ func DownsampleFrame(frame *image.RGBA, config PreviewConfig) [][]color.Gray {
 	return preview
 }
 
-// rgbToGrayscale converts RGB to grayscale using standard luminance formula
-// Y = 0.299*R + 0.587*G + 0.114*B
-func rgbToGrayscale(r, g, b uint8) uint8 {
-	// Use integer arithmetic for speed (coefficients scaled by 256)
-	// 0.299 ≈ 77/256, 0.587 ≈ 150/256, 0.114 ≈ 29/256
-	return uint8((77*uint32(r) + 150*uint32(g) + 29*uint32(b)) >> 8)
-}
-
-// RenderPreview converts a grayscale preview grid to a string representation
-// using Unicode block characters for grayscale rendering
-func RenderPreview(preview [][]color.Gray) string {
+// RenderPreview converts an RGB preview grid to a string representation
+// using ANSI 24-bit true color escape codes for beautiful colored rendering
+func RenderPreview(preview [][]color.RGBA) string {
 	if len(preview) == 0 {
 		return ""
 	}
 
-	// Build the preview string using Unicode block characters
-	// We'll use background colors to represent grayscale values
+	// Build the preview string using ANSI 24-bit RGB background colors
+	// Format: \x1b[48;2;R;G;Bm for background color, space character as pixel, \x1b[0m to reset
 	var result string
 
 	// Top border
 	result += "  Video Preview:\n"
 	result += "  ┌" + repeat("─", len(preview[0])) + "┐\n"
 
-	// Render each row
+	// Render each row with true color
 	for _, row := range preview {
 		result += "  │"
 		for _, pixel := range row {
-			// Map 0-255 grayscale to a shade character
-			// Using a gradient of block characters for better visual quality
-			char := grayscaleToChar(pixel.Y)
-			result += char
+			// ANSI escape: \x1b[48;2;R;G;Bm sets 24-bit RGB background color
+			result += fmt.Sprintf("\x1b[48;2;%d;%d;%dm \x1b[0m", pixel.R, pixel.G, pixel.B)
 		}
 		result += "│\n"
 	}
@@ -110,18 +99,6 @@ func RenderPreview(preview [][]color.Gray) string {
 	result += "  └" + repeat("─", len(preview[0])) + "┘\n"
 
 	return result
-}
-
-// grayscaleToChar maps a grayscale value (0-255) to a Unicode block character
-// Creates a smooth gradient from dark to light
-func grayscaleToChar(gray uint8) string {
-	// 10 levels of brightness using Unicode block elements
-	blocks := []string{" ", "░", "▒", "▓", "█", "█", "█", "█", "█", "█"}
-	index := int(gray) * len(blocks) / 256
-	if index >= len(blocks) {
-		index = len(blocks) - 1
-	}
-	return blocks[index]
 }
 
 // repeat creates a string by repeating s n times
