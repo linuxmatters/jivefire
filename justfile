@@ -10,7 +10,7 @@ build:
 
 # Generate a snapshot at 10 second mark
 snapshot: build
-    ./visualizer --snapshot --at=10.0 testdata/dream.wav testdata/snapshot.png
+    ./visualizer --snapshot=10.0 testdata/dream.wav testdata/snapshot.png
     @echo "✓ Snapshot saved to testdata/snapshot.png"
 
 # Render full video from dream.wav to test.mp4

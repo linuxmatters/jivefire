@@ -19,12 +19,13 @@ CLI audio visualizer written in Go that generates **discrete frequency bars** fo
 
 ### Generate Snapshot (for quick visual testing)
 ```bash
-./visualizer --snapshot --at=10.0 <input.wav> <output.png>
+./visualizer --snapshot=10.0 <input.wav> <output.png>
+# Or use short form:
+./visualizer -s 10.0 <input.wav> <output.png>
 ```
 
 Options:
-- `--snapshot`: Generate a single PNG frame instead of full video
-- `--at=<seconds>`: Timestamp for snapshot (default: 1.0)
+- `--snapshot=<seconds>` (or `-s`): Generate a single PNG frame at specified timestamp instead of full video
 
 ## Current Status: Production Ready ✅
 

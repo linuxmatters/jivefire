@@ -93,9 +93,34 @@ go build -o visualizer ./cmd/visualizer
 # Run
 ./visualizer testdata/dream.wav output.mp4
 
-# Snapshot mode
-./visualizer --snapshot --at=5.0 testdata/dream.wav frame.png
+# Snapshot mode (new consolidated syntax)
+./visualizer --snapshot=5.0 testdata/dream.wav frame.png
+./visualizer -s 5.0 testdata/dream.wav frame.png  # Short form
 ```
+
+## CLI Argument Handling
+
+The project uses **Kong** for declarative CLI argument parsing:
+
+```go
+var CLI struct {
+    Input    string   `arg:"" name:"input" help:"Input WAV file" type:"existingfile"`
+    Output   string   `arg:"" name:"output" help:"Output file (.mp4 for video, .png for snapshot)"`
+    Snapshot *float64 `help:"Generate snapshot at specified time (seconds) instead of full video" short:"s"`
+}
+```
+
+**Why Kong?**
+- **Declarative:** Arguments defined as struct tags, not imperative code
+- **Validation:** Built-in file existence checking, type validation
+- **Future-proof:** Easy to add more flags/subcommands as features grow
+- **Bubbletea compatible:** Clean separation for future TUI integration
+- **Professional help:** Automatic help generation with proper formatting
+
+**Migration from stdlib `flag`:**
+- **Before:** `--snapshot` (bool) + `--at=<time>` (float64) as separate flags
+- **After:** `--snapshot=<time>` as single consolidated flag
+- **Benefits:** Cleaner UX, single flag for one feature, short form `-s` available
 
 ## Next Steps for Development
 
