@@ -156,6 +156,34 @@ func (e *Encoder) Initialize() error {
 	return nil
 }
 
+// WriteFrameRGBA encodes and writes a single RGBA frame
+// Converts RGBA (4 bytes/pixel) to RGB24 (3 bytes/pixel) then encodes
+func (e *Encoder) WriteFrameRGBA(rgbaData []byte) error {
+	// Validate frame size
+	expectedSize := e.config.Width * e.config.Height * 4 // RGBA = 4 bytes per pixel
+	if len(rgbaData) != expectedSize {
+		return fmt.Errorf("invalid RGBA frame size: got %d, expected %d", len(rgbaData), expectedSize)
+	}
+
+	// Convert RGBA to RGB24 (strip alpha channel)
+	rgb24Size := e.config.Width * e.config.Height * 3
+	rgb24Data := make([]byte, rgb24Size)
+
+	srcIdx := 0
+	dstIdx := 0
+	for dstIdx < rgb24Size {
+		rgb24Data[dstIdx] = rgbaData[srcIdx]     // R
+		rgb24Data[dstIdx+1] = rgbaData[srcIdx+1] // G
+		rgb24Data[dstIdx+2] = rgbaData[srcIdx+2] // B
+		// Skip alpha at srcIdx+3
+		srcIdx += 4
+		dstIdx += 3
+	}
+
+	// Use existing RGB24 encoding path
+	return e.WriteFrame(rgb24Data)
+}
+
 // WriteFrame encodes and writes a single RGB frame
 func (e *Encoder) WriteFrame(rgbData []byte) error {
 	// Validate frame size

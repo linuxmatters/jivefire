@@ -12,6 +12,7 @@ import (
 	"github.com/alecthomas/kong"
 	"github.com/linuxmatters/jivefire/internal/audio"
 	"github.com/linuxmatters/jivefire/internal/config"
+	"github.com/linuxmatters/jivefire/internal/encoder"
 	"github.com/linuxmatters/jivefire/internal/renderer"
 )
 
@@ -95,37 +96,28 @@ func generateVideo(inputFile string, outputFile string) {
 	}
 	defer reader.Close()
 
-	// Start FFmpeg process with optimized settings
-	cmd := exec.Command("ffmpeg",
-		"-y",
-		"-f", "rawvideo",
-		"-pixel_format", "rgb24",
-		"-video_size", fmt.Sprintf("%dx%d", config.Width, config.Height),
-		"-framerate", fmt.Sprintf("%d", config.FPS),
-		"-i", "pipe:0",
-		"-i", inputFile,
-		"-c:v", "libx264",
-		"-preset", "ultrafast",
-		"-crf", "23",
-		"-c:a", "aac",
-		"-b:a", "192k",
-		"-pix_fmt", "yuv420p",
-		"-shortest",
-		outputFile,
-	)
+	// Create temporary video file (without audio)
+	videoOnlyPath := outputFile + ".video.mp4"
+	defer os.Remove(videoOnlyPath) // Clean up temp file
 
-	stdin, err := cmd.StdinPipe()
+	// Initialize encoder for video-only output
+	enc, err := encoder.New(encoder.Config{
+		OutputPath: videoOnlyPath,
+		Width:      config.Width,
+		Height:     config.Height,
+		Framerate:  config.FPS,
+	})
 	if err != nil {
-		fmt.Printf("Error creating pipe: %v\n", err)
+		fmt.Printf("Error creating encoder: %v\n", err)
 		os.Exit(1)
 	}
 
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Start(); err != nil {
-		fmt.Printf("Error starting FFmpeg: %v\n", err)
+	err = enc.Initialize()
+	if err != nil {
+		fmt.Printf("Error initializing encoder: %v\n", err)
 		os.Exit(1)
 	}
+	defer enc.Close()
 
 	// Load background image
 	bgImage, err := renderer.LoadBackgroundImage("assets/bg.png")
@@ -177,8 +169,6 @@ func generateVideo(inputFile string, outputFile string) {
 	initialChunk, err := reader.ReadChunk(config.FFTSize)
 	if err != nil {
 		fmt.Printf("\nError reading initial audio chunk: %v\n", err)
-		stdin.Close()
-		cmd.Wait()
 		os.Exit(1)
 	}
 	copy(fftBuffer, initialChunk)
@@ -271,9 +261,13 @@ func generateVideo(inputFile string, outputFile string) {
 		frame.Draw(rearrangedHeights)
 		totalDraw += time.Since(t0)
 
-		// Write raw RGB to FFmpeg
+		// Encode frame directly
 		t0 = time.Now()
-		renderer.WriteRawRGB(stdin, frame.GetImage())
+		img := frame.GetImage()
+		if err := enc.WriteFrameRGBA(img.Pix); err != nil {
+			fmt.Printf("\nError encoding frame %d: %v\n", frameNum, err)
+			os.Exit(1)
+		}
 		totalWrite += time.Since(t0)
 
 		if frameNum%30 == 0 {
@@ -289,7 +283,7 @@ func generateVideo(inputFile string, outputFile string) {
 			}
 			if err != nil {
 				fmt.Printf("\nError reading audio: %v\n", err)
-				break
+				os.Exit(1)
 			}
 
 			// Shift buffer left by samplesPerFrame, append new samples
@@ -298,11 +292,27 @@ func generateVideo(inputFile string, outputFile string) {
 		}
 	}
 
-	fmt.Printf("\nClosing FFmpeg...\n")
-	stdin.Close()
+	fmt.Printf("\nFinalizing video...\n")
+	if err := enc.Close(); err != nil {
+		fmt.Printf("Error closing encoder: %v\n", err)
+		os.Exit(1)
+	}
 
-	if err := cmd.Wait(); err != nil {
-		fmt.Printf("FFmpeg error: %v\n", err)
+	// Mux video with audio using FFmpeg
+	fmt.Printf("Muxing audio track...\n")
+	muxCmd := exec.Command("ffmpeg",
+		"-y",
+		"-i", videoOnlyPath,
+		"-i", inputFile,
+		"-c:v", "copy",      // Copy video stream (already encoded)
+		"-c:a", "aac",       // Encode audio to AAC
+		"-b:a", "192k",      // Audio bitrate
+		"-shortest",         // Match shortest stream duration
+		outputFile,
+	)
+	muxCmd.Stderr = os.Stderr
+	if err := muxCmd.Run(); err != nil {
+		fmt.Printf("Error muxing audio: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -312,7 +322,7 @@ func generateVideo(inputFile string, outputFile string) {
 	fmt.Printf("  FFT computation:   %v (%.1f%%)\n", totalFFT, float64(totalFFT)/float64(totalTime)*100)
 	fmt.Printf("  Bar binning:       %v (%.1f%%)\n", totalBin, float64(totalBin)/float64(totalTime)*100)
 	fmt.Printf("  Frame drawing:     %v (%.1f%%)\n", totalDraw, float64(totalDraw)/float64(totalTime)*100)
-	fmt.Printf("  FFmpeg writing:    %v (%.1f%%)\n", totalWrite, float64(totalWrite)/float64(totalTime)*100)
+	fmt.Printf("  Video encoding:    %v (%.1f%%)\n", totalWrite, float64(totalWrite)/float64(totalTime)*100)
 	fmt.Printf("  Total time:        %v\n", totalTime)
 	fmt.Printf("  Speed:             %.2fx realtime\n", profile.Duration/totalTime.Seconds())
 
