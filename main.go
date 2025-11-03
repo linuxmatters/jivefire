@@ -32,11 +32,11 @@ const (
 	fftSize    = 2048
 
 	// Visualization settings
-	numBars      = 64   // Close to 63, power of 2 for simplicity
-	barWidth     = 16   // Width of each bar
-	barGap       = 4    // Gap between bars
+	numBars      = 64   // Number of bars
+	barWidth     = 12   // Width of each bar
+	barGap       = 8    // Gap between bars
 	centerGap    = 100  // Gap between top and bottom bar sections
-	maxBarHeight = 0.65 // Maximum bar height as fraction of available space (0.8 = 80%)
+	maxBarHeight = 0.35 // Maximum bar height as fraction of available space
 
 	// Colors
 	barColorR = 164
@@ -138,15 +138,6 @@ func main() {
 
 	// Reuse image buffer across frames to reduce allocations
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
-
-	// Pre-create a single row of bar pixels (reused across all frames)
-	barRow := make([]byte, barWidth*4)
-	for i := 0; i < barWidth*4; i += 4 {
-		barRow[i] = barColorR
-		barRow[i+1] = barColorG
-		barRow[i+2] = barColorB
-		barRow[i+3] = 255
-	}
 
 	// CAVA algorithm implementation
 	// Smoothing: track previous bar heights for temporal smoothing
@@ -275,7 +266,7 @@ func main() {
 
 		// Generate frame image
 		t0 = time.Now()
-		drawFrame(rearrangedHeights, img, barRow, bgImage, fontFace)
+		drawFrame(rearrangedHeights, img, bgImage, fontFace)
 		totalDraw += time.Since(t0)
 
 		// Write raw RGB to FFmpeg
@@ -574,7 +565,7 @@ func drawEpisodeNumber(img *image.RGBA, face font.Face, episodeNum string) {
 	d.DrawString(episodeNum)
 }
 
-func drawFrame(barHeights []float64, img *image.RGBA, barRow []byte, bgImage *image.RGBA, fontFace font.Face) {
+func drawFrame(barHeights []float64, img *image.RGBA, bgImage *image.RGBA, fontFace font.Face) {
 	if bgImage != nil {
 		// Copy background image
 		draw.Draw(img, img.Bounds(), bgImage, image.Point{0, 0}, draw.Src)
@@ -590,12 +581,6 @@ func drawFrame(barHeights []float64, img *image.RGBA, barRow []byte, bgImage *im
 
 	// Center point
 	centerY := height / 2
-
-	// Draw center text if font is loaded
-	if fontFace != nil {
-		drawCenterText(img, fontFace, "Linux Matters Sample Text", centerY)
-		drawEpisodeNumber(img, fontFace, "00")
-	}
 
 	// Calculate starting position to center all bars
 	totalWidth := numBars*barWidth + (numBars-1)*barGap
@@ -657,6 +642,12 @@ func drawFrame(barHeights []float64, img *image.RGBA, barRow []byte, bgImage *im
 				}
 			}
 		}
+	}
+
+	// Draw center text and episode number on top of bars
+	if fontFace != nil {
+		drawCenterText(img, fontFace, "Linux Matters Sample Text", centerY)
+		drawEpisodeNumber(img, fontFace, "00")
 	}
 }
 
@@ -740,20 +731,11 @@ func generateSnapshot(samples []float64, outputFile string, atTime float64) {
 	// Create image
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
 
-	// Pre-create bar pixel row
-	barRow := make([]byte, barWidth*4)
-	for i := 0; i < barWidth*4; i += 4 {
-		barRow[i] = barColorR
-		barRow[i+1] = barColorG
-		barRow[i+2] = barColorB
-		barRow[i+3] = 255
-	}
-
 	// Rearrange frequencies for center-out symmetric distribution
 	rearrangedHeights := rearrangeFrequenciesCenterOut(barHeights)
 
 	// Draw frame
-	drawFrame(rearrangedHeights, img, barRow, bgImage, fontFace)
+	drawFrame(rearrangedHeights, img, bgImage, fontFace)
 
 	// Save as PNG
 	f, err := os.Create(outputFile)
