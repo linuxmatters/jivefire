@@ -552,6 +552,28 @@ func drawCenterText(img *image.RGBA, face font.Face, text string, centerY int) {
 	d.DrawString(text)
 }
 
+func drawEpisodeNumber(img *image.RGBA, face font.Face, episodeNum string) {
+	// Create a drawer
+	d := &font.Drawer{
+		Dst:  img,
+		Src:  image.NewUniform(color.RGBA{R: 248, G: 179, B: 29, A: 255}), // #F8B31D (brand yellow)
+		Face: face,
+	}
+
+	// Measure text dimensions
+	bounds, _ := d.BoundString(episodeNum)
+	textWidth := (bounds.Max.X - bounds.Min.X).Ceil()
+	textHeight := (bounds.Max.Y - bounds.Min.Y).Ceil()
+
+	// Position in top right corner with proportional offset (40px from edges)
+	offset := 30
+	x := width - textWidth - offset
+	y := textHeight + offset
+
+	d.Dot = freetype.Pt(x, y)
+	d.DrawString(episodeNum)
+}
+
 func drawFrame(barHeights []float64, img *image.RGBA, barRow []byte, bgImage *image.RGBA, fontFace font.Face) {
 	if bgImage != nil {
 		// Copy background image
@@ -572,6 +594,7 @@ func drawFrame(barHeights []float64, img *image.RGBA, barRow []byte, bgImage *im
 	// Draw center text if font is loaded
 	if fontFace != nil {
 		drawCenterText(img, fontFace, "Linux Matters Sample Text", centerY)
+		drawEpisodeNumber(img, fontFace, "00")
 	}
 
 	// Calculate starting position to center all bars
