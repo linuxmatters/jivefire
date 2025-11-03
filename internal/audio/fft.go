@@ -21,7 +21,8 @@ func ApplyHanning(data []float64) []float64 {
 // BinFFT bins FFT coefficients into bars and returns normalized values (0.0-1.0)
 // CAVA-style approach: work in normalized space, apply maxBarHeight scaling later
 // baseScale is calculated from Pass 1 analysis for optimal visualization
-func BinFFT(coeffs []complex128, sensitivity float64, baseScale float64) []float64 {
+// result buffer is provided by caller to avoid allocations
+func BinFFT(coeffs []complex128, sensitivity float64, baseScale float64, result []float64) {
 	// Use only first half (positive frequencies)
 	halfSize := len(coeffs) / 2
 
@@ -30,7 +31,6 @@ func BinFFT(coeffs []complex128, sensitivity float64, baseScale float64) []float
 	// between bass energy and mid/high content
 	maxFreqBin := (halfSize * 3) / 4
 
-	barHeights := make([]float64, config.NumBars)
 	binsPerBar := maxFreqBin / config.NumBars
 
 	for bar := 0; bar < config.NumBars; bar++ {
@@ -47,52 +47,48 @@ func BinFFT(coeffs []complex128, sensitivity float64, baseScale float64) []float
 			sum += magnitude
 		}
 
-		barHeights[bar] = sum / float64(binsPerBar)
+		result[bar] = sum / float64(binsPerBar)
 	}
 
 	// CAVA-style processing: apply sensitivity, then normalize to 0.0-1.0 range
 	// baseScale provided from Pass 1 analysis: OptimalBaseScale = 0.85 / GlobalPeak
 
-	for i := range barHeights {
+	for i := range result {
 		// Apply sensitivity to raw magnitude
-		scaled := barHeights[i] * baseScale * sensitivity
+		scaled := result[i] * baseScale * sensitivity
 
 		// Noise gate on raw values (before log scale)
 		if scaled < 0.01 {
-			barHeights[i] = 0
+			result[i] = 0
 		} else {
 			// Log scale for better visual distribution, normalize to ~0.0-1.0
 			// Log10(1 + scaled*9) gives range [0, 1] for scaled in [0, 1]
 			// We scale up for better dynamic range
-			barHeights[i] = math.Log10(1 + scaled*9)
+			result[i] = math.Log10(1 + scaled*9)
 
 			// DON'T clip here - let overshoot detection in main loop handle it
 			// This allows sensitivity adjustment to detect actual overshoots
 		}
 	}
-
-	return barHeights
 }
 
 // RearrangeFrequenciesCenterOut creates a symmetric mirror pattern with most active frequencies at CENTER
-func RearrangeFrequenciesCenterOut(barHeights []float64) []float64 {
+// result buffer is provided by caller to avoid allocations
+func RearrangeFrequenciesCenterOut(barHeights []float64, result []float64) {
 	// Left side: frequencies 0→31 placed from CENTER → LEFT EDGE (most active at center)
 	// Right side: frequencies 0→31 mirrored from CENTER → RIGHT EDGE
 	// Result: Most active (bass) at center, less active (highs) at edges
 
 	n := len(barHeights)
-	rearranged := make([]float64, n)
 	center := n / 2
 
 	// Place first half of frequencies mirrored from center outward
 	for i := 0; i < n/2; i++ {
 		// Left side: place from center going left (most active near center)
-		rearranged[center-1-i] = barHeights[i]
+		result[center-1-i] = barHeights[i]
 		// Right side: mirror (most active near center)
-		rearranged[center+i] = barHeights[i]
+		result[center+i] = barHeights[i]
 	}
-
-	return rearranged
 }
 
 // Processor handles FFT analysis for visualization

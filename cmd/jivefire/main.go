@@ -148,6 +148,10 @@ func generateVideo(inputFile string, outputFile string) {
 	cavaFall := make([]float64, config.NumBars)
 	cavaMem := make([]float64, config.NumBars)
 
+	// Pre-allocate reusable buffers to avoid allocations in render loop
+	barHeights := make([]float64, config.NumBars)
+	rearrangedHeights := make([]float64, config.NumBars)
+
 	// Calculate gravity modifier (CAVA formula)
 	gravityMod := math.Pow(60.0/config.Framerate, 2.5) * 1.54 / config.NoiseReduction
 	if gravityMod < 1.0 {
@@ -180,7 +184,7 @@ func generateVideo(inputFile string, outputFile string) {
 
 		// Compute magnitudes and bin into bars using optimal baseScale from Pass 1
 		t0 = time.Now()
-		barHeights := audio.BinFFT(coeffs, sensitivity, profile.OptimalBaseScale)
+		audio.BinFFT(coeffs, sensitivity, profile.OptimalBaseScale, barHeights)
 		totalBin += time.Since(t0)
 
 		// CAVA-style auto-sensitivity with soft knee compression
@@ -250,7 +254,7 @@ func generateVideo(inputFile string, outputFile string) {
 		}
 
 		// Rearrange frequencies for center-out distribution
-		rearrangedHeights := audio.RearrangeFrequenciesCenterOut(prevBarHeights)
+		audio.RearrangeFrequenciesCenterOut(prevBarHeights, rearrangedHeights)
 
 		// Generate frame image
 		t0 = time.Now()
@@ -342,7 +346,8 @@ func generateSnapshot(samples []float64, outputFile string, atTime float64) {
 	// Compute magnitudes and bin into bars
 	// TODO Phase 4: Replace with profile.OptimalBaseScale from Pass 1 analysis
 	const baseScale = 0.0075 // Temporary: will be replaced with calculated value
-	barHeights := audio.BinFFT(coeffs, 1.0, baseScale)
+	barHeights := make([]float64, config.NumBars)
+	audio.BinFFT(coeffs, 1.0, baseScale, barHeights)
 
 	// Load background image
 	bgImage, err := renderer.LoadBackgroundImage("assets/bg.png")
@@ -362,7 +367,8 @@ func generateSnapshot(samples []float64, outputFile string, atTime float64) {
 	frame := renderer.NewFrame(bgImage, fontFace)
 
 	// Rearrange frequencies
-	rearrangedHeights := audio.RearrangeFrequenciesCenterOut(barHeights)
+	rearrangedHeights := make([]float64, config.NumBars)
+	audio.RearrangeFrequenciesCenterOut(barHeights, rearrangedHeights)
 
 	// Draw frame
 	frame.Draw(rearrangedHeights)
