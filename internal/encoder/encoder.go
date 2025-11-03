@@ -281,9 +281,52 @@ func (e *Encoder) initializeAudio() error {
 		return fmt.Errorf("failed to open audio decoder: %d", ret)
 	}
 
+	// Validate audio input format
+	sampleFmt := e.audioDecoder.SampleFmt()
+	channels := e.audioDecoder.Channels()
+	sampleRate := e.audioDecoder.SampleRate()
+	
 	// Log the decoder's output format
-	fmt.Printf("Audio decoder output format: %d (sample rate: %d, channels: %d)\n",
-		e.audioDecoder.SampleFmt(), e.audioDecoder.SampleRate(), e.audioDecoder.Channels())
+	fmt.Printf("Audio input: format=%d, sample_rate=%dHz, channels=%d\n", sampleFmt, sampleRate, channels)
+
+	// Check if we support this sample format
+	supportedFormats := map[int32]string{
+		1: "16-bit signed integer",
+		3: "32-bit float", 
+		6: "16-bit signed integer planar",
+		8: "32-bit float planar",
+	}
+	
+	sampleFmtInt := int32(sampleFmt)
+	if _, ok := supportedFormats[sampleFmtInt]; !ok {
+		// Provide helpful format names for common unsupported formats
+		formatName := "unknown"
+		switch sampleFmtInt {
+		case 0:
+			formatName = "8-bit unsigned"
+		case 2:
+			formatName = "32-bit signed integer (24-bit audio)"
+		case 4:
+			formatName = "64-bit float"
+		case 5:
+			formatName = "8-bit unsigned planar"
+		case 7:
+			formatName = "32-bit signed integer planar"
+		case 9:
+			formatName = "64-bit float planar"
+		}
+		return fmt.Errorf("unsupported audio format: %s (format %d). Supported formats: 16-bit PCM and 32-bit float", formatName, sampleFmtInt)
+	}
+
+	// Check channel count - we only support mono input
+	if channels != 1 {
+		return fmt.Errorf("unsupported channel count: %d (only mono input is supported)", channels)
+	}
+
+	// Check sample rate is reasonable
+	if sampleRate < 8000 || sampleRate > 192000 {
+		return fmt.Errorf("unsupported sample rate: %dHz (must be between 8kHz and 192kHz)", sampleRate)
+	}
 
 	// Set up AAC encoder for output
 	audioEncoder := ffmpeg.AVCodecFindEncoder(ffmpeg.AVCodecIdAac)
