@@ -91,7 +91,7 @@ func RenderPreview(preview [][]color.RGBA) string {
 	builder.Grow(len(preview) * len(preview[0]) * 20)
 
 	// Top border
-	builder.WriteString("  Video Preview:\n  ┌")
+	builder.WriteString("Video Preview:\n┌")
 	builder.WriteString(strings.Repeat("─", len(preview[0])))
 	builder.WriteString("┐\n")
 
@@ -100,7 +100,7 @@ func RenderPreview(preview [][]color.RGBA) string {
 
 	// Render each row with true color
 	for _, row := range preview {
-		builder.WriteString("  │")
+		builder.WriteString("│")
 		for _, pixel := range row {
 			// Build ANSI escape manually (faster than fmt.Sprintf)
 			colorBuf = colorBuf[:0]
@@ -117,9 +117,9 @@ func RenderPreview(preview [][]color.RGBA) string {
 	}
 
 	// Bottom border
-	builder.WriteString("  └")
+	builder.WriteString("└")
 	builder.WriteString(strings.Repeat("─", len(preview[0])))
-	builder.WriteString("┘\n")
+	builder.WriteString("┘")
 
 	return builder.String()
 }

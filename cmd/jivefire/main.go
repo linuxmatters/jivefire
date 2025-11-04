@@ -198,6 +198,17 @@ func generateVideo(inputFile string, outputFile string) {
 		var totalFFT, totalBin, totalDraw, totalWrite time.Duration
 		renderStartTime := time.Now()
 
+		// Get audio format information for codec display
+		audioSampleRate := reader.SampleRate()
+		audioChannels := reader.NumChannels()
+		audioChannelStr := "mono"
+		if audioChannels == 2 {
+			audioChannelStr = "stereo"
+		} else if audioChannels > 2 {
+			audioChannelStr = fmt.Sprintf("%dch", audioChannels)
+		}
+		audioCodecInfo := fmt.Sprintf("AAC %.1fkHz %s", float64(audioSampleRate)/1000.0, audioChannelStr)
+
 		// CAVA algorithm state
 		prevBarHeights := make([]float64, config.NumBars)
 		cavaPeaks := make([]float64, config.NumBars)
@@ -356,6 +367,8 @@ func generateVideo(inputFile string, outputFile string) {
 					FileSize:    estimatedSize,
 					Sensitivity: sensitivity,
 					FrameData:   frameData, // Send frame every 6 frames for preview
+					VideoCodec:  fmt.Sprintf("H.264 %d×%d", config.Width, config.Height),
+					AudioCodec:  audioCodecInfo,
 				})
 			}
 

@@ -1001,3 +1001,8 @@ func (e *Encoder) Close() error {
 
 	return nil
 }
+
+// GetVideoFramesEncoded returns the number of video frames encoded so far
+func (e *Encoder) GetVideoFramesEncoded() int64 {
+	return e.nextVideoPts
+}

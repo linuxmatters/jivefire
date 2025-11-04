@@ -20,6 +20,8 @@ type Pass2Progress struct {
 	FileSize    int64       // Estimated current file size in bytes
 	Sensitivity float64     // Current sensitivity value
 	FrameData   *image.RGBA // Current frame RGB data for video preview (optional)
+	VideoCodec  string      // Video codec info (e.g., "H.264 1920×1080")
+	AudioCodec  string      // Audio codec info (e.g., "AAC 48kHz stereo")
 }
 
 // Pass2Complete signals completion of Pass 2
@@ -59,7 +61,8 @@ type pass2Model struct {
 func NewPass2Model() tea.Model {
 	p := progress.New(
 		progress.WithDefaultGradient(),
-		progress.WithWidth(60),
+		progress.WithWidth(40),
+		progress.WithoutPercentage(), // Hide built-in percentage display
 	)
 
 	return &pass2Model{
@@ -82,7 +85,7 @@ func (m *pass2Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.progress.Width = min(msg.Width-20, 80)
+		m.progress.Width = min(msg.Width-30, 50)
 		return m, nil
 
 	case Pass2Progress:
@@ -153,14 +156,22 @@ func (m *pass2Model) renderProgress() string {
 	s.WriteString(subtitle)
 	s.WriteString("\n\n")
 
-	// Progress bar
+	// Progress bar with percentage in the center
 	if m.lastUpdate.TotalFrames > 0 {
 		percent := float64(m.lastUpdate.Frame) / float64(m.lastUpdate.TotalFrames)
-		s.WriteString(fmt.Sprintf("Progress: %s %d%% (%d/%d)\n\n",
-			m.progress.ViewAs(percent),
+
+		// Render progress bar
+		progressBar := m.progress.ViewAs(percent)
+		percentText := fmt.Sprintf("%d%% (%d/%d)",
 			int(percent*100),
 			m.lastUpdate.Frame,
-			m.lastUpdate.TotalFrames))
+			m.lastUpdate.TotalFrames)
+
+		s.WriteString("Progress: ")
+		s.WriteString(progressBar)
+		s.WriteString("  ")
+		s.WriteString(percentText)
+		s.WriteString("\n\n")
 
 		// Timing information
 		elapsed := m.lastUpdate.Elapsed
@@ -195,19 +206,47 @@ func (m *pass2Model) renderProgress() string {
 		s.WriteString("\n\n")
 	}
 
-	// Live Visualization
+	// Live Visualization and Stats side-by-side
 	if len(m.lastUpdate.BarHeights) > 0 {
+		// Live Visualization header
 		s.WriteString(lipgloss.NewStyle().Faint(true).Render("Live Visualization:"))
 		s.WriteString("\n")
 
-		// Render spectrum (reuse from Pass 1)
+		// Render spectrum bars and stats side-by-side
+		var leftCol strings.Builder
 		spectrum := renderSpectrum(m.lastUpdate.BarHeights, min(m.width-4, 72))
-		s.WriteString(spectrum)
-		s.WriteString("\n")
+		leftCol.WriteString(spectrum)
+		leftCol.WriteString("\n")
+		leftCol.WriteString(spectrum) // Mirror for stereo effect
 
-		// Mirror for stereo effect (even though it's mono)
-		s.WriteString(spectrum)
-		s.WriteString("\n\n")
+		var rightCol strings.Builder
+		if m.lastUpdate.FileSize > 0 || m.lastUpdate.VideoCodec != "" || m.lastUpdate.AudioCodec != "" {
+			// Create styled stats display
+			labelStyle := lipgloss.NewStyle().Faint(true)
+			valueStyle := lipgloss.NewStyle().Bold(true)
+
+			rightCol.WriteString(labelStyle.Render("File:  "))
+			rightCol.WriteString(valueStyle.Render(formatBytes(m.lastUpdate.FileSize)))
+			rightCol.WriteString("\n")
+
+			if m.lastUpdate.VideoCodec != "" {
+				rightCol.WriteString(labelStyle.Render("Video: "))
+				rightCol.WriteString(valueStyle.Render(m.lastUpdate.VideoCodec))
+				rightCol.WriteString("\n")
+			}
+
+			if m.lastUpdate.AudioCodec != "" {
+				rightCol.WriteString(labelStyle.Render("Audio: "))
+				rightCol.WriteString(valueStyle.Render(m.lastUpdate.AudioCodec))
+			}
+		}
+
+		// Join horizontally with proper spacing
+		s.WriteString(lipgloss.JoinHorizontal(lipgloss.Top,
+			leftCol.String(),
+			"  ", // spacing
+			rightCol.String()))
+		s.WriteString("\n")
 
 		// Video preview - regenerate if new frame data available, otherwise use cached
 		if m.lastUpdate.FrameData != nil && m.lastUpdate.Frame != m.cachedFrameNum {
@@ -220,19 +259,9 @@ func (m *pass2Model) renderProgress() string {
 
 		// Always display cached preview once we have one (prevents flickering)
 		if m.cachedPreview != "" {
-			s.WriteString(m.cachedPreview)
 			s.WriteString("\n")
+			s.WriteString(m.cachedPreview)
 		}
-	}
-
-	// Bottom stats line
-	if m.lastUpdate.FileSize > 0 || m.lastUpdate.Sensitivity > 0 {
-		statsLine := fmt.Sprintf("File Size: %s  │  Sensitivity: %.2f  │  Frame: %d",
-			formatBytes(m.lastUpdate.FileSize),
-			m.lastUpdate.Sensitivity,
-			m.lastUpdate.Frame)
-		s.WriteString(lipgloss.NewStyle().Faint(true).Render(statsLine))
-		s.WriteString("\n")
 	}
 
 	return lipgloss.NewStyle().

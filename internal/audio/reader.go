@@ -146,3 +146,8 @@ func (r *StreamingReader) NumSamples() int64 {
 func (r *StreamingReader) SampleRate() int {
 	return r.sampleRate
 }
+
+// NumChannels returns the number of audio channels
+func (r *StreamingReader) NumChannels() int {
+	return int(r.decoder.NumChans)
+}
