@@ -3,9 +3,19 @@ name: Build
 on:
   push:
     branches: [ main ]
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/build.yml'
   pull_request:
     branches: [ main ]
-  workflow_dispatch:  # Allows manual triggering
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/build.yml'
+  workflow_dispatch:
 
 jobs:
   build-linux:
@@ -45,7 +55,6 @@ jobs:
         with:
           name: jivefire-linux-${{ matrix.goarch }}
           path: jivefire-linux-${{ matrix.goarch }}
-          retention-days: 7
 
   build-darwin:
     name: Build for macOS ${{ matrix.goarch }}
@@ -78,4 +87,3 @@ jobs:
         with:
           name: jivefire-darwin-${{ matrix.goarch }}
           path: jivefire-darwin-${{ matrix.goarch }}
-          retention-days: 7
