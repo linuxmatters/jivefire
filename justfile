@@ -9,13 +9,16 @@ default:
 build:
     go build -o jivefire ./cmd/jivefire
 
-# Render full video from dream.wav to test.mp4
-video: build
-    ./jivefire --episode 42 --title "Testing Testing" testdata/dream.wav testdata/test.mp4
-
 # Clean build artifacts
 clean:
     rm -fv jivefire
+
+vhs: build
+    vhs ./jivefire.tape
+
+# Render full video from dream.wav to test.mp4
+video: build
+    ./jivefire --episode 42 --title "Testing Testing" testdata/dream.wav testdata/test.mp4
 
 # Run tests
 test:

@@ -18,6 +18,8 @@
 ./jivefire --episode=42 --title="Linux Matters" input.wav output.mp4
 ```
 
+<div align="center"><img alt="Jivefire Demo" src=".github/jivefire.gif" width="860" /></div>
+
 ## What You Get
 
 - **64 discrete frequency bars**

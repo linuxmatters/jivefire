@@ -27,6 +27,7 @@
             go
             just
             mediainfo
+            vhs
           ];
         };
       }
