@@ -57,8 +57,8 @@ func NewPass1Model() tea.Model {
 	return &pass1Model{
 		progress:        p,
 		startTime:       time.Now(),
-		minDisplayTime:  1500 * time.Millisecond, // Show UI for at least 1.5 seconds
-		completionDelay: 2 * time.Second,         // Show completion for 2 seconds
+		minDisplayTime:  500 * time.Millisecond,
+		completionDelay: 250 * time.Millisecond,
 		quitting:        false,
 	}
 }

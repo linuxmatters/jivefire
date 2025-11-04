@@ -71,4 +71,4 @@ Set Theme catppuccin-mocha
 
 Type "./jivefire --episode=42 --title='Testing Testing' testdata/dream.wav testdata/test.mp4" Sleep 250ms  Enter
 
-Sleep 15s
+Sleep 12s
