@@ -12,6 +12,7 @@ import (
 	"github.com/alecthomas/kong"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/linuxmatters/jivefire/internal/audio"
+	"github.com/linuxmatters/jivefire/internal/cli"
 	"github.com/linuxmatters/jivefire/internal/config"
 	"github.com/linuxmatters/jivefire/internal/encoder"
 	"github.com/linuxmatters/jivefire/internal/renderer"
@@ -21,7 +22,7 @@ import (
 const version = "0.0.1"
 
 var CLI struct {
-	Input    string   `arg:"" name:"input" help:"Input WAV file" type:"existingfile" optional:""`
+	Input    string   `arg:"" name:"input" help:"Input WAV file" optional:""`
 	Output   string   `arg:"" name:"output" help:"Output file (.mp4 for video, .png for snapshot)" optional:""`
 	Snapshot *float64 `help:"Generate snapshot at specified time (seconds) instead of full video" short:"s"`
 	Version  bool     `help:"Show version information" short:"v"`
@@ -33,20 +34,24 @@ func main() {
 		kong.Description("Spin your podcast .wav into a groovy MP4 visualiser. Cava-inspired audio frequencies dancing in real-time."),
 		kong.Vars{"version": version},
 		kong.UsageOnError(),
-		kong.ConfigureHelp(kong.HelpOptions{
-			Compact: true,
-		}),
+		kong.Help(cli.StyledHelpPrinter(kong.HelpOptions{Compact: true})),
 	)
 
 	// Handle version flag
 	if CLI.Version {
-		fmt.Printf("jivefire version %s\n", version)
+		cli.PrintVersion(version)
 		os.Exit(0)
 	}
 
 	// Validate required arguments when not showing version
 	if CLI.Input == "" || CLI.Output == "" {
-		fmt.Fprintln(os.Stderr, "Error: <input> and <output> are required")
+		cli.PrintError("<input> and <output> are required")
+		os.Exit(1)
+	}
+
+	// Validate input file exists
+	if _, err := os.Stat(CLI.Input); os.IsNotExist(err) {
+		cli.PrintError(fmt.Sprintf("input file does not exist: %s", CLI.Input))
 		os.Exit(1)
 	}
 
@@ -62,13 +67,13 @@ func main() {
 
 	if snapshotMode {
 		// Snapshot mode: use old single-pass approach for simplicity
-		fmt.Printf("Reading audio: %s\n", inputFile)
+		cli.PrintInfo("Reading audio", inputFile)
 		samples, err := audio.ReadWAV(inputFile)
 		if err != nil {
-			fmt.Printf("Error reading WAV: %v\n", err)
+			cli.PrintError(fmt.Sprintf("reading WAV: %v", err))
 			os.Exit(1)
 		}
-		fmt.Printf("Loaded %d samples\n", len(samples))
+		cli.PrintInfo("Loaded samples", fmt.Sprintf("%d", len(samples)))
 
 		generateSnapshot(samples, outputFile, snapshotTime)
 		return
@@ -121,13 +126,13 @@ func generateVideo(inputFile string, outputFile string) {
 
 	// Run the Bubbletea UI
 	if _, err := p.Run(); err != nil {
-		fmt.Printf("Error running UI: %v\n", err)
+		cli.PrintError(fmt.Sprintf("running UI: %v", err))
 		os.Exit(1)
 	}
 
 	// Check for analysis errors
 	if analysisErr != nil {
-		fmt.Printf("Error analyzing audio: %v\n", analysisErr)
+		cli.PrintError(fmt.Sprintf("analyzing audio: %v", analysisErr))
 		os.Exit(1)
 	}
 
@@ -142,7 +147,7 @@ func generateVideo(inputFile string, outputFile string) {
 	// Open streaming reader for Pass 2
 	reader, err := audio.NewStreamingReader(inputFile)
 	if err != nil {
-		fmt.Printf("Error opening audio stream: %v\n", err)
+		cli.PrintError(fmt.Sprintf("opening audio stream: %v", err))
 		os.Exit(1)
 	}
 	defer reader.Close()
@@ -156,13 +161,13 @@ func generateVideo(inputFile string, outputFile string) {
 		AudioPath:  inputFile, // Enable Phase 2B audio processing
 	})
 	if err != nil {
-		fmt.Printf("Error creating encoder: %v\n", err)
+		cli.PrintError(fmt.Sprintf("creating encoder: %v", err))
 		os.Exit(1)
 	}
 
 	err = enc.Initialize()
 	if err != nil {
-		fmt.Printf("Error initializing encoder: %v\n", err)
+		cli.PrintError(fmt.Sprintf("initializing encoder: %v", err))
 		os.Exit(1)
 	}
 
@@ -442,19 +447,19 @@ func generateVideo(inputFile string, outputFile string) {
 
 	// Run the Bubbletea UI
 	if _, err := p2.Run(); err != nil {
-		fmt.Printf("Error running UI: %v\n", err)
+		cli.PrintError(fmt.Sprintf("running UI: %v", err))
 		os.Exit(1)
 	}
 
 	// Check for encoding errors
 	if encodingErr != nil {
-		fmt.Printf("Error during encoding: %v\n", encodingErr)
+		cli.PrintError(fmt.Sprintf("during encoding: %v", encodingErr))
 		os.Exit(1)
 	}
 }
 
 func generateSnapshot(samples []float64, outputFile string, atTime float64) {
-	fmt.Printf("Generating snapshot at %.2f seconds...\n", atTime)
+	cli.PrintInfo("Generating snapshot", fmt.Sprintf("at %.2f seconds", atTime))
 
 	// Calculate the frame position
 	samplesPerFrame := config.SampleRate / config.FPS
@@ -463,7 +468,7 @@ func generateSnapshot(samples []float64, outputFile string, atTime float64) {
 	end := start + config.FFTSize
 
 	if start >= len(samples) {
-		fmt.Printf("Error: timestamp %.2f is beyond audio duration\n", atTime)
+		cli.PrintError(fmt.Sprintf("timestamp %.2f is beyond audio duration", atTime))
 		os.Exit(1)
 	}
 
@@ -487,14 +492,14 @@ func generateSnapshot(samples []float64, outputFile string, atTime float64) {
 	// Load background image
 	bgImage, err := renderer.LoadBackgroundImage("assets/bg.png")
 	if err != nil {
-		fmt.Printf("Warning: Could not load assets/bg.png: %v\n", err)
+		cli.PrintWarning(fmt.Sprintf("Could not load assets/bg.png: %v", err))
 		bgImage = nil
 	}
 
 	// Load font
 	fontFace, err := renderer.LoadFont("assets/Poppins-Regular.ttf", 48)
 	if err != nil {
-		fmt.Printf("Warning: Could not load Poppins-Regular.ttf: %v\n", err)
+		cli.PrintWarning(fmt.Sprintf("Could not load Poppins-Regular.ttf: %v", err))
 		fontFace = nil
 	}
 
@@ -511,15 +516,15 @@ func generateSnapshot(samples []float64, outputFile string, atTime float64) {
 	// Save as PNG
 	f, err := os.Create(outputFile)
 	if err != nil {
-		fmt.Printf("Error creating output file: %v\n", err)
+		cli.PrintError(fmt.Sprintf("creating output file: %v", err))
 		os.Exit(1)
 	}
 	defer f.Close()
 
 	if err := png.Encode(f, frame.GetImage()); err != nil {
-		fmt.Printf("Error encoding PNG: %v\n", err)
+		cli.PrintError(fmt.Sprintf("encoding PNG: %v", err))
 		os.Exit(1)
 	}
 
-	fmt.Printf("Snapshot saved to: %s\n", outputFile)
+	cli.PrintSuccess(fmt.Sprintf("Snapshot saved to: %s", outputFile))
 }
