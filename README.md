@@ -13,6 +13,11 @@
 ./jivefire input.wav output.mp4
 ```
 
+### With Episode Number and Title
+```bash
+./jivefire --episode=42 --title="Linux Matters" input.wav output.mp4
+```
+
 ## What You Get
 
 - **64 discrete frequency bars**

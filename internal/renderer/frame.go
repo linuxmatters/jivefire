@@ -1,6 +1,7 @@
 package renderer
 
 import (
+	"fmt"
 	"image"
 	"sync"
 
@@ -17,6 +18,10 @@ type Frame struct {
 	startX     int
 	totalWidth int
 
+	// Text overlay
+	episodeNum string
+	title      string
+
 	// Pre-computed values
 	maxBarHeight  int
 	alphaTable    []uint8    // Pre-computed alpha values for gradient
@@ -31,7 +36,7 @@ var framePool = sync.Pool{
 }
 
 // NewFrame creates a new optimized frame renderer
-func NewFrame(bgImage *image.RGBA, fontFace font.Face) *Frame {
+func NewFrame(bgImage *image.RGBA, fontFace font.Face, episodeNum int, title string) *Frame {
 	totalWidth := config.NumBars*config.BarWidth + (config.NumBars-1)*config.BarGap
 	startX := (config.Width - totalWidth) / 2
 	centerY := config.Height / 2
@@ -56,6 +61,12 @@ func NewFrame(bgImage *image.RGBA, fontFace font.Face) *Frame {
 		barColorTable[alpha][2] = uint8(float64(config.BarColorB) * factor)
 	}
 
+	// Format episode number as two-digit string
+	episodeStr := "00"
+	if episodeNum > 0 {
+		episodeStr = formatEpisodeNumber(episodeNum)
+	}
+
 	f := &Frame{
 		img:           framePool.Get().(*image.RGBA),
 		bgImage:       bgImage,
@@ -63,6 +74,8 @@ func NewFrame(bgImage *image.RGBA, fontFace font.Face) *Frame {
 		centerY:       centerY,
 		startX:        startX,
 		totalWidth:    totalWidth,
+		episodeNum:    episodeStr,
+		title:         title,
 		maxBarHeight:  maxBarHeight,
 		alphaTable:    alphaTable,
 		barColorTable: barColorTable,
@@ -287,9 +300,18 @@ func (f *Frame) drawBarsWithBackground(barHeights []float64) {
 // applyTextOverlay renders text onto the frame
 func (f *Frame) applyTextOverlay() {
 	if f.fontFace != nil {
-		DrawCenterText(f.img, f.fontFace, "Linux Matters Sample Text", f.centerY)
-		DrawEpisodeNumber(f.img, f.fontFace, "00")
+		DrawCenterText(f.img, f.fontFace, f.title, f.centerY)
+		DrawEpisodeNumber(f.img, f.fontFace, f.episodeNum)
 	}
+}
+
+// formatEpisodeNumber formats an episode number as a two-digit string
+func formatEpisodeNumber(num int) string {
+	if num < 100 {
+		return fmt.Sprintf("%02d", num)
+	}
+	// For numbers >= 100, return as-is
+	return fmt.Sprintf("%d", num)
 }
 
 // GetImage returns the current frame image

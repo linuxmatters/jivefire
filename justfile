@@ -11,16 +11,11 @@ build:
 
 # Render full video from dream.wav to test.mp4
 video: build
-    ./jivefire testdata/dream.wav testdata/test.mp4
+    ./jivefire --episode 42 --title "Testing Testing" testdata/dream.wav testdata/test.mp4
 
 # Clean build artifacts
 clean:
-    rm -f jivefire
-    @echo "✓ Cleaned build artifacts"
-
-# Run with custom input/output
-run INPUT OUTPUT: build
-    ./jivefire {{INPUT}} {{OUTPUT}}
+    rm -fv jivefire
 
 # Run tests
 test:

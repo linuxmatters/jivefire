@@ -23,7 +23,9 @@ const version = "0.0.1"
 var CLI struct {
 	Input   string `arg:"" name:"input" help:"Input WAV file" optional:""`
 	Output  string `arg:"" name:"output" help:"Output MP4 file" optional:""`
-	Version bool   `help:"Show version information" short:"v"`
+	Episode int    `help:"Episode number" default:"0"`
+	Title   string `help:"Podcast title" default:"Podcast Title"`
+	Version bool   `help:"Show version information"`
 }
 
 func main() {
@@ -173,7 +175,7 @@ func generateVideo(inputFile string, outputFile string) {
 
 		// Create audio processor and frame renderer
 		processor := audio.NewProcessor()
-		frame := renderer.NewFrame(bgImage, fontFace)
+		frame := renderer.NewFrame(bgImage, fontFace, CLI.Episode, CLI.Title)
 
 		// Calculate frames from profile
 		numFrames := profile.NumFrames
