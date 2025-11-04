@@ -41,7 +41,7 @@ jobs:
           ls -lh jivefire-linux-${{ matrix.goarch }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: jivefire-linux-${{ matrix.goarch }}
           path: jivefire-linux-${{ matrix.goarch }}
@@ -74,7 +74,7 @@ jobs:
           ls -lh jivefire-darwin-${{ matrix.goarch }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: jivefire-darwin-${{ matrix.goarch }}
           path: jivefire-darwin-${{ matrix.goarch }}
