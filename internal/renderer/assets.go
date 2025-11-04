@@ -1,10 +1,11 @@
 package renderer
 
 import (
+	"bytes"
+	"embed"
 	"image"
 	"image/color"
 	"image/png"
-	"os"
 
 	"github.com/golang/freetype"
 	"github.com/golang/freetype/truetype"
@@ -13,15 +14,18 @@ import (
 	"golang.org/x/image/font"
 )
 
-// LoadBackgroundImage loads and scales a PNG background image
-func LoadBackgroundImage(filename string) (*image.RGBA, error) {
-	f, err := os.Open(filename)
+//go:embed assets/bg.png
+//go:embed assets/Poppins-Regular.ttf
+var embeddedAssets embed.FS
+
+// LoadBackgroundImage loads and scales the embedded PNG background image
+func LoadBackgroundImage() (*image.RGBA, error) {
+	data, err := embeddedAssets.ReadFile("assets/bg.png")
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
 
-	img, err := png.Decode(f)
+	img, err := png.Decode(bytes.NewReader(data))
 	if err != nil {
 		return nil, err
 	}
@@ -35,9 +39,9 @@ func LoadBackgroundImage(filename string) (*image.RGBA, error) {
 	return rgba, nil
 }
 
-// LoadFont loads a TrueType font from a file
-func LoadFont(fontPath string, size float64) (font.Face, error) {
-	fontBytes, err := os.ReadFile(fontPath)
+// LoadFont loads the embedded TrueType font
+func LoadFont(size float64) (font.Face, error) {
+	fontBytes, err := embeddedAssets.ReadFile("assets/Poppins-Regular.ttf")
 	if err != nil {
 		return nil, err
 	}

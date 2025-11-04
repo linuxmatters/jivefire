@@ -161,14 +161,14 @@ func generateVideo(inputFile string, outputFile string) {
 	go func() {
 		defer enc.Close()
 
-		// Load background image
-		bgImage, err := renderer.LoadBackgroundImage("assets/bg.png")
+		// Load background image (embedded)
+		bgImage, err := renderer.LoadBackgroundImage()
 		if err != nil {
 			bgImage = nil
 		}
 
-		// Load font for center text
-		fontFace, err := renderer.LoadFont("assets/Poppins-Regular.ttf", 48)
+		// Load font for center text (embedded)
+		fontFace, err := renderer.LoadFont(48)
 		if err != nil {
 			fontFace = nil
 		}
