@@ -8,22 +8,14 @@ on:
   workflow_dispatch:  # Allows manual triggering
 
 jobs:
-  build:
-    name: Build for ${{ matrix.goos }}-${{ matrix.goarch }}
+  build-linux:
+    name: Build for Linux ${{ matrix.goarch }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        include:
-          - goos: darwin
-            goarch: amd64
-          - goos: darwin
-            goarch: arm64
-          - goos: linux
-            goarch: amd64
-          - goos: linux
-            goarch: arm64
-      fail-fast: false  # Continue building other platforms if one fails
-    
+        goarch: [amd64, arm64]
+      fail-fast: false
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -33,19 +25,57 @@ jobs:
         with:
           go-version: '1.24'
 
-      - name: Build
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: 0
+      - name: Install dependencies
         run: |
-          echo "Building for $GOOS/$GOARCH..."
-          go build -v -o jivefire-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/jivefire
-          ls -lh jivefire-${{ matrix.goos }}-${{ matrix.goarch }}
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build Linux ${{ matrix.goarch }}
+        env:
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 1
+          CC: ${{ matrix.goarch == 'arm64' && 'aarch64-linux-gnu-gcc' || 'gcc' }}
+        run: |
+          echo "Building for linux/${{ matrix.goarch }} with CGO..."
+          go build -v -o jivefire-linux-${{ matrix.goarch }} ./cmd/jivefire
+          ls -lh jivefire-linux-${{ matrix.goarch }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: jivefire-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: jivefire-${{ matrix.goos }}-${{ matrix.goarch }}
-          retention-days: 7  # Keep artifacts for a week
+          name: jivefire-linux-${{ matrix.goarch }}
+          path: jivefire-linux-${{ matrix.goarch }}
+          retention-days: 7
+
+  build-darwin:
+    name: Build for macOS ${{ matrix.goarch }}
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        goarch: [amd64, arm64]
+      fail-fast: false
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Build macOS ${{ matrix.goarch }}
+        env:
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 1
+        run: |
+          echo "Building for darwin/${{ matrix.goarch }} with CGO..."
+          go build -v -o jivefire-darwin-${{ matrix.goarch }} ./cmd/jivefire
+          ls -lh jivefire-darwin-${{ matrix.goarch }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jivefire-darwin-${{ matrix.goarch }}
+          path: jivefire-darwin-${{ matrix.goarch }}
+          retention-days: 7
