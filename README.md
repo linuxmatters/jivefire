@@ -1,23 +1,16 @@
 # Jivefire 🔥
 
-> Spin your podcast .wav into a groovy MP4 visualiser. Cava-inspired audio frequencies dancing in real-time.
+> Spin your podcast .wav into a groovy MP4 visualiser. [Cava](https://github.com/karlstav/cava)-inspired real-time audio frequencies.
 
 ## The Groove
 
-64 discrete bars. Symmetric mirroring. Silky smooth decay animation. That's Jivefire.
+64 discrete bars. Symmetric mirroring. Silky smooth decay animation.
 
 ## Usage
 
 ### Generate Video
 ```bash
 ./jivefire input.wav output.mp4
-```
-
-### Snapshot
-Get a preview image.
-
-```bash
-./jivefire --snapshot=10.0 input.wav frame.png
 ```
 
 ## What You Get
@@ -33,7 +26,6 @@ Get a preview image.
 ```bash
 just build      # Build binary
 just video      # Render test audio
-just snapshot   # Quick 10s frame
 
 # Manual
 go build -o jivefire ./cmd/jivefire

@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"image"
-	"image/png"
 	"io"
 	"math"
 	"os"
@@ -22,16 +21,15 @@ import (
 const version = "0.0.1"
 
 var CLI struct {
-	Input    string   `arg:"" name:"input" help:"Input WAV file" optional:""`
-	Output   string   `arg:"" name:"output" help:"Output file (.mp4 for video, .png for snapshot)" optional:""`
-	Snapshot *float64 `help:"Generate snapshot at specified time (seconds) instead of full video" short:"s"`
-	Version  bool     `help:"Show version information" short:"v"`
+	Input   string `arg:"" name:"input" help:"Input WAV file" optional:""`
+	Output  string `arg:"" name:"output" help:"Output MP4 file" optional:""`
+	Version bool   `help:"Show version information" short:"v"`
 }
 
 func main() {
 	ctx := kong.Parse(&CLI,
 		kong.Name("jivefire"),
-		kong.Description("Spin your podcast .wav into a groovy MP4 visualiser. Cava-inspired audio frequencies dancing in real-time."),
+		kong.Description("Spin your podcast .wav into a groovy MP4 visualiser."),
 		kong.Vars{"version": version},
 		kong.UsageOnError(),
 		kong.Help(cli.StyledHelpPrinter(kong.HelpOptions{Compact: true})),
@@ -57,29 +55,10 @@ func main() {
 
 	inputFile := CLI.Input
 	outputFile := CLI.Output
-	snapshotMode := CLI.Snapshot != nil
-	snapshotTime := 1.0
-	if snapshotMode {
-		snapshotTime = *CLI.Snapshot
-	}
 
 	_ = ctx // Kong context available for future use
 
-	if snapshotMode {
-		// Snapshot mode: use old single-pass approach for simplicity
-		cli.PrintInfo("Reading audio", inputFile)
-		samples, err := audio.ReadWAV(inputFile)
-		if err != nil {
-			cli.PrintError(fmt.Sprintf("reading WAV: %v", err))
-			os.Exit(1)
-		}
-		cli.PrintInfo("Loaded samples", fmt.Sprintf("%d", len(samples)))
-
-		generateSnapshot(samples, outputFile, snapshotTime)
-		return
-	}
-
-	// Video mode: use 2-pass streaming approach
+	// Generate video using 2-pass streaming approach
 	generateVideo(inputFile, outputFile)
 }
 
@@ -456,75 +435,6 @@ func generateVideo(inputFile string, outputFile string) {
 		cli.PrintError(fmt.Sprintf("during encoding: %v", encodingErr))
 		os.Exit(1)
 	}
-}
 
-func generateSnapshot(samples []float64, outputFile string, atTime float64) {
-	cli.PrintInfo("Generating snapshot", fmt.Sprintf("at %.2f seconds", atTime))
-
-	// Calculate the frame position
-	samplesPerFrame := config.SampleRate / config.FPS
-	frameNumber := int(atTime * float64(config.FPS))
-	start := frameNumber * samplesPerFrame
-	end := start + config.FFTSize
-
-	if start >= len(samples) {
-		cli.PrintError(fmt.Sprintf("timestamp %.2f is beyond audio duration", atTime))
-		os.Exit(1)
-	}
-
-	if end > len(samples) {
-		end = len(samples)
-	}
-
-	// Get FFT of this chunk
-	chunk := samples[start:end]
-
-	// Create audio processor
-	processor := audio.NewProcessor()
-	coeffs := processor.ProcessChunk(chunk)
-
-	// Compute magnitudes and bin into bars
-	// TODO Phase 4: Replace with profile.OptimalBaseScale from Pass 1 analysis
-	const baseScale = 0.0075 // Temporary: will be replaced with calculated value
-	barHeights := make([]float64, config.NumBars)
-	audio.BinFFT(coeffs, 1.0, baseScale, barHeights)
-
-	// Load background image
-	bgImage, err := renderer.LoadBackgroundImage("assets/bg.png")
-	if err != nil {
-		cli.PrintWarning(fmt.Sprintf("Could not load assets/bg.png: %v", err))
-		bgImage = nil
-	}
-
-	// Load font
-	fontFace, err := renderer.LoadFont("assets/Poppins-Regular.ttf", 48)
-	if err != nil {
-		cli.PrintWarning(fmt.Sprintf("Could not load Poppins-Regular.ttf: %v", err))
-		fontFace = nil
-	}
-
-	// Create frame
-	frame := renderer.NewFrame(bgImage, fontFace)
-
-	// Rearrange frequencies
-	rearrangedHeights := make([]float64, config.NumBars)
-	audio.RearrangeFrequenciesCenterOut(barHeights, rearrangedHeights)
-
-	// Draw frame
-	frame.Draw(rearrangedHeights)
-
-	// Save as PNG
-	f, err := os.Create(outputFile)
-	if err != nil {
-		cli.PrintError(fmt.Sprintf("creating output file: %v", err))
-		os.Exit(1)
-	}
-	defer f.Close()
-
-	if err := png.Encode(f, frame.GetImage()); err != nil {
-		cli.PrintError(fmt.Sprintf("encoding PNG: %v", err))
-		os.Exit(1)
-	}
-
-	cli.PrintSuccess(fmt.Sprintf("Snapshot saved to: %s", outputFile))
+	cli.PrintSuccess(fmt.Sprintf("Done! Output: %s", outputFile))
 }
