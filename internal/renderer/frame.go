@@ -134,9 +134,15 @@ func (f *Frame) drawBarsNoBackground(barHeights []float64) {
 				continue
 			}
 
-			// Get pre-computed alpha for this height
-			heightFromBottom := y - yStart
-			alpha := f.alphaTable[barHeight-1-heightFromBottom]
+			// Get pre-computed alpha for this height (fade from center to tip)
+			// Calculate index into alphaTable based on distance from center
+			distanceFromCenter := yEnd - 1 - y
+			// Scale to alphaTable index range
+			alphaIndex := (distanceFromCenter * f.maxBarHeight) / barHeight
+			if alphaIndex >= f.maxBarHeight {
+				alphaIndex = f.maxBarHeight - 1
+			}
+			alpha := f.alphaTable[alphaIndex]
 			colors := &f.barColorTable[alpha]
 
 			// Fill pixel pattern once for this scanline
@@ -162,9 +168,14 @@ func (f *Frame) drawBarsNoBackground(barHeights []float64) {
 				break
 			}
 
-			// Get pre-computed alpha for this height
+			// Get pre-computed alpha for this height (fade from center to tip)
 			heightFromTop := y - yStart
-			alpha := f.alphaTable[heightFromTop]
+			// Scale to alphaTable index range
+			alphaIndex := (heightFromTop * f.maxBarHeight) / barHeight
+			if alphaIndex >= f.maxBarHeight {
+				alphaIndex = f.maxBarHeight - 1
+			}
+			alpha := f.alphaTable[alphaIndex]
 			colors := &f.barColorTable[alpha]
 
 			// Fill pixel pattern once for this scanline
@@ -212,8 +223,14 @@ func (f *Frame) drawBarsWithBackground(barHeights []float64) {
 				continue
 			}
 
-			heightFromBottom := y - yStart
-			alpha := f.alphaTable[barHeight-1-heightFromBottom]
+			// Calculate distance from center (fade from center to tip)
+			distanceFromCenter := yEnd - 1 - y
+			// Scale to alphaTable index range
+			alphaIndex := (distanceFromCenter * f.maxBarHeight) / barHeight
+			if alphaIndex >= f.maxBarHeight {
+				alphaIndex = f.maxBarHeight - 1
+			}
+			alpha := f.alphaTable[alphaIndex]
 			alphaF := float64(alpha) / 255.0
 			invAlphaF := 1.0 - alphaF
 
@@ -242,7 +259,12 @@ func (f *Frame) drawBarsWithBackground(barHeights []float64) {
 			}
 
 			heightFromTop := y - yStart
-			alpha := f.alphaTable[heightFromTop]
+			// Scale to alphaTable index range
+			alphaIndex := (heightFromTop * f.maxBarHeight) / barHeight
+			if alphaIndex >= f.maxBarHeight {
+				alphaIndex = f.maxBarHeight - 1
+			}
+			alpha := f.alphaTable[alphaIndex]
 			alphaF := float64(alpha) / 255.0
 			invAlphaF := 1.0 - alphaF
 
