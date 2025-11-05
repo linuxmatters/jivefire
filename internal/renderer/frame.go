@@ -113,15 +113,22 @@ func (f *Frame) Draw(barHeights []float64) {
 	}
 }
 
-// drawBars renders all bars using vertical symmetry optimization.
-// Renders upward bars only, then mirrors them vertically to create downward bars.
-// This approach preserves the fade gradient while being ~2x faster.
+// drawBars renders all bars using horizontal + vertical symmetry optimization.
+// The frequency data is arranged symmetrically: bars 0-31 are mirrored to create bars 32-63.
+// We render only the first 32 bars upward, then mirror 3 times:
+//  1. Vertical mirror → bars 0-31 downward
+//  2. Horizontal mirror → bars 32-63 upward
+//  3. Both mirrors → bars 32-63 downward
+//
+// This renders 1/4 of the pixels and is ~4x faster.
 func (f *Frame) drawBars(barHeights []float64) {
 	// Pre-allocate pixel pattern buffer (reused for all bars)
 	pixelPattern := make([]byte, config.BarWidth*4)
 
-	for i, h := range barHeights {
-		barHeight := int(h)
+	// Render only left half (bars 0-31), upward only
+	halfBars := config.NumBars / 2
+	for i := 0; i < halfBars; i++ {
+		barHeight := int(barHeights[i])
 		if barHeight <= 0 {
 			continue
 		}
@@ -136,7 +143,7 @@ func (f *Frame) drawBars(barHeights []float64) {
 			barHeight = f.maxBarHeight
 		}
 
-		// Render upward bar only
+		// Render upward bar only (left half)
 		yStart := f.centerY - barHeight - config.CenterGap/2
 		yEnd := f.centerY - config.CenterGap/2
 
@@ -145,9 +152,32 @@ func (f *Frame) drawBars(barHeights []float64) {
 		} else {
 			f.renderBarNoBackground(x, yStart, yEnd, barHeight, pixelPattern)
 		}
+	}
 
-		// Mirror upward bar to create downward bar (vertical symmetry)
-		f.mirrorBarVertical(x, yStart, yEnd, barHeight)
+	// Now mirror in 3 operations to fill remaining 3/4 of the bars:
+	// 1. Vertical mirror: bars 0-31 upward → bars 0-31 downward
+	// 2. Horizontal mirror: bars 0-31 upward → bars 32-63 upward
+	// 3. Both mirrors: bars 0-31 upward → bars 32-63 downward
+	for i := 0; i < halfBars; i++ {
+		barHeight := int(barHeights[i])
+		if barHeight <= 0 {
+			continue
+		}
+
+		xLeft := f.startX + i*(config.BarWidth+config.BarGap)
+		xRight := f.startX + (config.NumBars-1-i)*(config.BarWidth+config.BarGap)
+
+		yStart := f.centerY - barHeight - config.CenterGap/2
+		yEnd := f.centerY - config.CenterGap/2
+
+		// 1. Vertical mirror: create left-side downward bars
+		f.mirrorBarVertical(xLeft, yStart, yEnd)
+
+		// 2. Horizontal mirror: create right-side upward bars
+		f.mirrorBarHorizontal(xLeft, xRight, yStart, yEnd)
+
+		// 3. Both mirrors: create right-side downward bars
+		f.mirrorBarVertical(xRight, yStart, yEnd)
 	}
 }
 
@@ -217,7 +247,7 @@ func (f *Frame) renderBarWithBackground(x, yStart, yEnd, barHeight int) {
 
 // mirrorBarVertical creates downward bar by mirroring upward bar pixels.
 // Copies scanlines in reverse order to preserve the fade gradient.
-func (f *Frame) mirrorBarVertical(x, yStart, yEnd, barHeight int) {
+func (f *Frame) mirrorBarVertical(x, yStart, yEnd int) {
 	upwardHeight := yEnd - yStart
 	downStart := f.centerY + config.CenterGap/2
 
@@ -232,6 +262,22 @@ func (f *Frame) mirrorBarVertical(x, yStart, yEnd, barHeight int) {
 
 		srcOffset := srcY*f.img.Stride + x*4
 		dstOffset := dstY*f.img.Stride + x*4
+		copy(f.img.Pix[dstOffset:dstOffset+config.BarWidth*4],
+			f.img.Pix[srcOffset:srcOffset+config.BarWidth*4])
+	}
+}
+
+// mirrorBarHorizontal creates right-side bar by copying left-side bar pixels.
+// Copies the entire upward bar from left position to right position.
+func (f *Frame) mirrorBarHorizontal(xLeft, xRight, yStart, yEnd int) {
+	// Copy each scanline from left bar to right bar
+	for y := yStart; y < yEnd; y++ {
+		if y < 0 || y >= config.Height {
+			continue
+		}
+
+		srcOffset := y*f.img.Stride + xLeft*4
+		dstOffset := y*f.img.Stride + xRight*4
 		copy(f.img.Pix[dstOffset:dstOffset+config.BarWidth*4],
 			f.img.Pix[srcOffset:srcOffset+config.BarWidth*4])
 	}
