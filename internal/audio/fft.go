@@ -3,8 +3,8 @@ package audio
 import (
 	"math"
 
+	"github.com/argusdusty/gofft"
 	"github.com/linuxmatters/jivefire/internal/config"
-	"gonum.org/v1/gonum/dsp/fourier"
 )
 
 // ApplyHanning applies a Hanning window to the input data
@@ -93,14 +93,12 @@ func RearrangeFrequenciesCenterOut(barHeights []float64, result []float64) {
 
 // Processor handles FFT analysis for visualization
 type Processor struct {
-	fft *fourier.FFT
+	// gofft doesn't need state - it works in-place
 }
 
 // NewProcessor creates a new audio processor
 func NewProcessor() *Processor {
-	return &Processor{
-		fft: fourier.NewFFT(config.FFTSize),
-	}
+	return &Processor{}
 }
 
 // ProcessChunk performs FFT on a chunk of audio samples
@@ -116,6 +114,16 @@ func (p *Processor) ProcessChunk(samples []float64) []complex128 {
 	// Apply Hanning window
 	windowed := ApplyHanning(chunk)
 
-	// Compute FFT
-	return p.fft.Coefficients(nil, windowed)
+	// Convert to complex128 for gofft
+	// gofft works in-place, modifying the input array
+	fftInput := gofft.Float64ToComplex128Array(windowed)
+
+	// Compute FFT in-place
+	err := gofft.FFT(fftInput)
+	if err != nil {
+		// Should never happen with power-of-2 size
+		panic("FFT failed: " + err.Error())
+	}
+
+	return fftInput
 }
