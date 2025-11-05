@@ -26,10 +26,10 @@ func BinFFT(coeffs []complex128, sensitivity float64, baseScale float64, result 
 	// Use only first half (positive frequencies)
 	halfSize := len(coeffs) / 2
 
-	// Focus on frequency range where most audio content is
-	// Use first 3/4 of spectrum (0 to ~16.5kHz) for better balance
-	// between bass energy and mid/high content
-	maxFreqBin := (halfSize * 3) / 4
+	// Use full spectrum up to Nyquist frequency (~22kHz at 44.1kHz sample rate)
+	// This captures the complete audible range including high-frequency content
+	// from cymbals, hi-hats, and musical "air" in stings and bumpers
+	maxFreqBin := halfSize
 
 	binsPerBar := maxFreqBin / config.NumBars
 

@@ -213,8 +213,9 @@ func analyzeFrame(coeffs []complex128, audioChunk []float64) FrameAnalysis {
 	analysis.RMSLevel = math.Sqrt(sumSquares / float64(len(audioChunk)))
 
 	// Analyze frequency bins (same logic as BinFFT)
+	// Use full spectrum up to Nyquist frequency for complete frequency coverage
 	halfSize := len(coeffs) / 2
-	maxFreqBin := (halfSize * 3) / 4
+	maxFreqBin := halfSize
 	binsPerBar := maxFreqBin / config.NumBars
 
 	for bar := 0; bar < config.NumBars; bar++ {
