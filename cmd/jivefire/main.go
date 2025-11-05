@@ -231,15 +231,32 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 		fftBuffer := make([]float64, config.FFTSize)
 
 		// Pre-fill buffer with first chunk
-		initialChunk, err := reader.ReadChunk(config.FFTSize)
-		if err != nil {
-			encodingErr = fmt.Errorf("error reading initial audio chunk: %w", err)
+		// Keep reading until we get the requested number of samples or EOF
+		var initialSamples []float64
+		for len(initialSamples) < config.FFTSize {
+			chunk, err := reader.ReadChunk(config.FFTSize - len(initialSamples))
+			if err != nil {
+				if err == io.EOF {
+					break // Use what we have
+				}
+				encodingErr = fmt.Errorf("error reading initial audio chunk: %w", err)
+				p2.Quit()
+				return
+			}
+			initialSamples = append(initialSamples, chunk...)
+		}
+
+		if len(initialSamples) == 0 {
+			encodingErr = fmt.Errorf("no audio data available")
 			p2.Quit()
 			return
 		}
-		copy(fftBuffer, initialChunk)
 
-		for frameNum := 0; frameNum < numFrames; frameNum++ {
+		copy(fftBuffer, initialSamples)
+
+		// Process frames until we run out of audio
+		frameNum := 0
+		for frameNum < numFrames {
 			// Use current buffer for FFT
 			chunk := fftBuffer[:config.FFTSize]
 
@@ -371,21 +388,47 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 				})
 			}
 
+			// Advance to next frame
+			frameNum++
+
 			// Advance sliding buffer for next frame
-			// Read samplesPerFrame new samples and shift buffer
-			if frameNum < numFrames-1 { // Don't read past end
-				newSamples, err := reader.ReadChunk(samplesPerFrame)
-				if err == io.EOF {
-					break // Unexpected EOF
-				}
+			// Keep reading until we get the requested number of samples or EOF
+			newSamples := make([]float64, 0, samplesPerFrame)
+			for len(newSamples) < samplesPerFrame {
+				chunk, err := reader.ReadChunk(samplesPerFrame - len(newSamples))
 				if err != nil {
+					if err == io.EOF {
+						// If we got no new samples at all, we're done
+						if len(newSamples) == 0 {
+							// Break out of the frame loop - no more audio
+							frameNum = numFrames
+							break
+						}
+						// Got partial frame at end of file, use what we have
+						break
+					}
 					encodingErr = fmt.Errorf("error reading audio: %w", err)
 					p2.Quit()
 					return
 				}
+				newSamples = append(newSamples, chunk...)
+			}
 
-				// Shift buffer left by samplesPerFrame, append new samples
-				copy(fftBuffer, fftBuffer[samplesPerFrame:])
+			// If we got no new samples, we're done
+			if len(newSamples) == 0 {
+				break
+			}
+
+			// Shift buffer left by samplesPerFrame, append new samples
+			copy(fftBuffer, fftBuffer[samplesPerFrame:])
+			// Pad with zeros if we got fewer samples than expected
+			if len(newSamples) < samplesPerFrame {
+				copy(fftBuffer[config.FFTSize-samplesPerFrame:], newSamples)
+				// Zero-fill the remaining space
+				for i := config.FFTSize - samplesPerFrame + len(newSamples); i < config.FFTSize; i++ {
+					fftBuffer[i] = 0
+				}
+			} else {
 				copy(fftBuffer[config.FFTSize-samplesPerFrame:], newSamples)
 			}
 		}
