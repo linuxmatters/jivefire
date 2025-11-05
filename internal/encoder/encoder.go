@@ -11,11 +11,12 @@ import (
 
 // Config holds the encoder configuration
 type Config struct {
-	OutputPath string // Path to output MP4 file
-	Width      int    // Video width in pixels
-	Height     int    // Video height in pixels
-	Framerate  int    // Frames per second
-	AudioPath  string // Path to input WAV file (for Phase 2)
+	OutputPath    string // Path to output MP4 file
+	Width         int    // Video width in pixels
+	Height        int    // Video height in pixels
+	Framerate     int    // Frames per second
+	AudioPath     string // Path to input WAV file (for Phase 2)
+	AudioChannels int    // Output audio channels: 1 (mono) or 2 (stereo), defaults to 1
 }
 
 // AudioFIFO provides a simple FIFO buffer for audio samples
@@ -350,11 +351,22 @@ func (e *Encoder) initializeAudio() error {
 	e.audioCodec.SetSampleFmt(ffmpeg.AVSampleFmtFltp) // AAC requires float planar
 	e.audioCodec.SetSampleRate(e.audioDecoder.SampleRate())
 
-	// AAC encoder requires stereo - if input is mono, we'll duplicate channels
+	// Set channel configuration based on config (default mono)
+	outputChannels := e.config.AudioChannels
+	if outputChannels == 0 {
+		outputChannels = 1 // Default to mono if not specified
+	}
+
 	// Using the older channel layout API
-	// 3 = AV_CH_LAYOUT_STEREO (left + right channels)
-	e.audioCodec.SetChannelLayout(3)
-	e.audioCodec.SetChannels(2)
+	if outputChannels == 1 {
+		// 4 = AV_CH_LAYOUT_MONO (single channel)
+		e.audioCodec.SetChannelLayout(4)
+		e.audioCodec.SetChannels(1)
+	} else {
+		// 3 = AV_CH_LAYOUT_STEREO (left + right channels)
+		e.audioCodec.SetChannelLayout(3)
+		e.audioCodec.SetChannels(2)
+	}
 
 	e.audioCodec.SetBitRate(192000) // 192 kbps
 	e.audioStream.SetTimeBase(ffmpeg.AVMakeQ(1, e.audioCodec.SampleRate()))
@@ -393,8 +405,13 @@ func (e *Encoder) initializeAudio() error {
 	// Configure encoder frame with correct size
 	e.audioEncFrame.SetNbSamples(e.audioCodec.FrameSize())
 	e.audioEncFrame.SetFormat(int(ffmpeg.AVSampleFmtFltp))
-	e.audioEncFrame.SetChannelLayout(3) // AV_CH_LAYOUT_STEREO
-	e.audioEncFrame.SetChannels(2)
+	if outputChannels == 1 {
+		e.audioEncFrame.SetChannelLayout(4) // AV_CH_LAYOUT_MONO
+		e.audioEncFrame.SetChannels(1)
+	} else {
+		e.audioEncFrame.SetChannelLayout(3) // AV_CH_LAYOUT_STEREO
+		e.audioEncFrame.SetChannels(2)
+	}
 	e.audioEncFrame.SetSampleRate(e.audioCodec.SampleRate())
 
 	ret, err = ffmpeg.AVFrameGetBuffer(e.audioEncFrame, 0)
@@ -743,6 +760,30 @@ func extractFloatsWithDownmix(frame *ffmpeg.AVFrame, channels int) ([]float32, e
 	return samples, nil
 }
 
+// writeMonoFloats writes mono float samples to an encoder frame
+func writeMonoFloats(frame *ffmpeg.AVFrame, samples []float32) error {
+	nbSamples := len(samples)
+
+	// Get pointer for mono channel (planar format)
+	dataPtr := frame.Data().Get(0)
+
+	if dataPtr == nil {
+		return fmt.Errorf("frame data pointer not allocated")
+	}
+
+	// Convert to byte slice for writing
+	data := (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[: nbSamples*4 : nbSamples*4]
+
+	// Write samples to channel
+	for i := 0; i < nbSamples; i++ {
+		// Write channel - direct float32 byte copy
+		sampleFloat := samples[i]
+		copy(data[i*4:(i+1)*4], (*[4]byte)(unsafe.Pointer(&sampleFloat))[:])
+	}
+
+	return nil
+}
+
 // writeStereoFloats writes stereo float samples to an encoder frame
 func writeStereoFloats(frame *ffmpeg.AVFrame, samples []float32) error {
 	nbSamples := len(samples) / 2 // stereo has 2 channels
@@ -828,22 +869,45 @@ func (e *Encoder) ProcessAudio() error {
 				return fmt.Errorf("failed to extract samples: %w", err)
 			}
 
-			// Convert mono to stereo
-			stereoSamples := monoToStereo(monoSamples)
+			// Determine output channels
+			outputChannels := e.config.AudioChannels
+			if outputChannels == 0 {
+				outputChannels = 1 // Default to mono
+			}
+
+			// Convert to output format
+			var outputSamples []float32
+			if outputChannels == 2 {
+				// Convert mono to stereo
+				outputSamples = monoToStereo(monoSamples)
+			} else {
+				// Keep as mono
+				outputSamples = monoSamples
+			}
 
 			// Push to FIFO
-			e.audioFIFO.Push(stereoSamples)
+			e.audioFIFO.Push(outputSamples)
 
 			// Process all complete frames in FIFO
-			for e.audioFIFO.Available() >= encoderFrameSize*2 { // *2 for stereo
+			samplesPerFrame := encoderFrameSize * outputChannels
+			for e.audioFIFO.Available() >= samplesPerFrame {
 				// Pop exactly one encoder frame worth of samples
-				frameSamples := e.audioFIFO.Pop(encoderFrameSize * 2)
+				frameSamples := e.audioFIFO.Pop(samplesPerFrame)
 
 				// Make frame writable and write samples
 				ffmpeg.AVFrameMakeWritable(e.audioEncFrame)
-				if err := writeStereoFloats(e.audioEncFrame, frameSamples); err != nil {
+				
+				var writeErr error
+				if outputChannels == 2 {
+					writeErr = writeStereoFloats(e.audioEncFrame, frameSamples)
+				} else {
+					writeErr = writeMonoFloats(e.audioEncFrame, frameSamples)
+				}
+				
+				if writeErr != nil {
 					ffmpeg.AVPacketUnref(e.audioPacket)
-					return fmt.Errorf("failed to write stereo samples: %w", err)
+					return fmt.Errorf("failed to write %s samples: %w", 
+						map[int]string{1: "mono", 2: "stereo"}[outputChannels], writeErr)
 				}
 
 				// Set PTS

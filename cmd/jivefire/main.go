@@ -25,6 +25,7 @@ var CLI struct {
 	Output    string `arg:"" name:"output" help:"Output MP4 file" optional:""`
 	Episode   int    `help:"Episode number" default:"0"`
 	Title     string `help:"Podcast title" default:"Podcast Title"`
+	Channels  int    `help:"Audio channels in MP4: 1 (mono) or 2 (stereo)" default:"1"`
 	NoPreview bool   `help:"Disable video preview during encoding"`
 	Version   bool   `help:"Show version information"`
 }
@@ -56,17 +57,24 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Validate channels
+	if CLI.Channels != 1 && CLI.Channels != 2 {
+		cli.PrintError(fmt.Sprintf("invalid channels value: %d (must be 1 or 2)", CLI.Channels))
+		os.Exit(1)
+	}
+
 	inputFile := CLI.Input
 	outputFile := CLI.Output
+	channels := CLI.Channels
 	noPreview := CLI.NoPreview
 
 	_ = ctx // Kong context available for future use
 
 	// Generate video using 2-pass streaming approach
-	generateVideo(inputFile, outputFile, noPreview)
+	generateVideo(inputFile, outputFile, channels, noPreview)
 }
 
-func generateVideo(inputFile string, outputFile string, noPreview bool) {
+func generateVideo(inputFile string, outputFile string, channels int, noPreview bool) {
 	// ============================================================================
 	// PASS 1: Analyze audio to calculate optimal parameters
 	// ============================================================================
@@ -137,11 +145,12 @@ func generateVideo(inputFile string, outputFile string, noPreview bool) {
 
 	// Initialize encoder with both video and audio
 	enc, err := encoder.New(encoder.Config{
-		OutputPath: outputFile,
-		Width:      config.Width,
-		Height:     config.Height,
-		Framerate:  config.FPS,
-		AudioPath:  inputFile, // Enable Phase 2B audio processing
+		OutputPath:    outputFile,
+		Width:         config.Width,
+		Height:        config.Height,
+		Framerate:     config.FPS,
+		AudioPath:     inputFile, // Enable Phase 2B audio processing
+		AudioChannels: channels,  // Mono (1) or stereo (2)
 	})
 	if err != nil {
 		cli.PrintError(fmt.Sprintf("creating encoder: %v", err))
@@ -188,12 +197,13 @@ func generateVideo(inputFile string, outputFile string, noPreview bool) {
 
 		// Get audio format information for codec display
 		audioSampleRate := reader.SampleRate()
-		audioChannels := reader.NumChannels()
+		// Use output channel count (from CLI), not input channel count
+		outputChannels := channels
 		audioChannelStr := "mono"
-		if audioChannels == 2 {
+		if outputChannels == 2 {
 			audioChannelStr = "stereo"
-		} else if audioChannels > 2 {
-			audioChannelStr = fmt.Sprintf("%dch", audioChannels)
+		} else if outputChannels > 2 {
+			audioChannelStr = fmt.Sprintf("%dch", outputChannels)
 		}
 		audioCodecInfo := fmt.Sprintf("AAC %.1fkHz %s", float64(audioSampleRate)/1000.0, audioChannelStr)
 
