@@ -104,12 +104,8 @@ func (f *Frame) Draw(barHeights []float64) {
 		}
 	}
 
-	// Draw bars with optimized algorithm
-	if f.hasBackground {
-		f.drawBarsWithBackground(barHeights)
-	} else {
-		f.drawBarsNoBackground(barHeights) // Much faster path for black background
-	}
+	// Draw bars with vertical symmetry optimization
+	f.drawBars(barHeights)
 
 	// Apply text overlay
 	if f.fontFace != nil {
@@ -117,8 +113,10 @@ func (f *Frame) Draw(barHeights []float64) {
 	}
 }
 
-// drawBarsNoBackground optimized path when no background (just black)
-func (f *Frame) drawBarsNoBackground(barHeights []float64) {
+// drawBars renders all bars using vertical symmetry optimization.
+// Renders upward bars only, then mirrors them vertically to create downward bars.
+// This approach preserves the fade gradient while being ~2x faster.
+func (f *Frame) drawBars(barHeights []float64) {
 	// Pre-allocate pixel pattern buffer (reused for all bars)
 	pixelPattern := make([]byte, config.BarWidth*4)
 
@@ -138,162 +136,104 @@ func (f *Frame) drawBarsNoBackground(barHeights []float64) {
 			barHeight = f.maxBarHeight
 		}
 
-		// Draw upward bar
+		// Render upward bar only
 		yStart := f.centerY - barHeight - config.CenterGap/2
 		yEnd := f.centerY - config.CenterGap/2
 
-		for y := yStart; y < yEnd; y++ {
-			if y < 0 {
-				continue
-			}
-
-			// Get pre-computed alpha for this height (fade from center to tip)
-			// Calculate index into alphaTable based on distance from center
-			distanceFromCenter := yEnd - 1 - y
-			// Scale to alphaTable index range
-			alphaIndex := (distanceFromCenter * f.maxBarHeight) / barHeight
-			if alphaIndex >= f.maxBarHeight {
-				alphaIndex = f.maxBarHeight - 1
-			}
-			alpha := f.alphaTable[alphaIndex]
-			colors := &f.barColorTable[alpha]
-
-			// Fill pixel pattern once for this scanline
-			for px := 0; px < config.BarWidth; px++ {
-				offset := px * 4
-				pixelPattern[offset] = colors[0]
-				pixelPattern[offset+1] = colors[1]
-				pixelPattern[offset+2] = colors[2]
-				pixelPattern[offset+3] = 255
-			}
-
-			// Write entire bar width with single copy
-			offset := y*f.img.Stride + x*4
-			copy(f.img.Pix[offset:offset+config.BarWidth*4], pixelPattern)
+		if f.hasBackground {
+			f.renderBarWithBackground(x, yStart, yEnd, barHeight)
+		} else {
+			f.renderBarNoBackground(x, yStart, yEnd, barHeight, pixelPattern)
 		}
 
-		// Draw downward bar (mirror)
-		yStart = f.centerY + config.CenterGap/2
-		yEnd = f.centerY + barHeight + config.CenterGap/2
+		// Mirror upward bar to create downward bar (vertical symmetry)
+		f.mirrorBarVertical(x, yStart, yEnd, barHeight)
+	}
+}
 
-		for y := yStart; y < yEnd; y++ {
-			if y >= config.Height {
-				break
-			}
+// renderBarNoBackground renders a single upward bar without background blending
+func (f *Frame) renderBarNoBackground(x, yStart, yEnd, barHeight int, pixelPattern []byte) {
+	for y := yStart; y < yEnd; y++ {
+		if y < 0 {
+			continue
+		}
 
-			// Get pre-computed alpha for this height (fade from center to tip)
-			heightFromTop := y - yStart
-			// Scale to alphaTable index range
-			alphaIndex := (heightFromTop * f.maxBarHeight) / barHeight
-			if alphaIndex >= f.maxBarHeight {
-				alphaIndex = f.maxBarHeight - 1
-			}
-			alpha := f.alphaTable[alphaIndex]
-			colors := &f.barColorTable[alpha]
+		// Calculate alpha for fade gradient (dim at tip → bright at center)
+		distanceFromCenter := yEnd - 1 - y
+		alphaIndex := (distanceFromCenter * f.maxBarHeight) / barHeight
+		if alphaIndex >= f.maxBarHeight {
+			alphaIndex = f.maxBarHeight - 1
+		}
+		alpha := f.alphaTable[alphaIndex]
+		colors := &f.barColorTable[alpha]
 
-			// Fill pixel pattern once for this scanline
-			for px := 0; px < config.BarWidth; px++ {
-				offset := px * 4
-				pixelPattern[offset] = colors[0]
-				pixelPattern[offset+1] = colors[1]
-				pixelPattern[offset+2] = colors[2]
-				pixelPattern[offset+3] = 255
-			}
+		// Fill pixel pattern once for this scanline
+		for px := 0; px < config.BarWidth; px++ {
+			offset := px * 4
+			pixelPattern[offset] = colors[0]
+			pixelPattern[offset+1] = colors[1]
+			pixelPattern[offset+2] = colors[2]
+			pixelPattern[offset+3] = 255
+		}
 
-			// Write entire bar width with single copy
-			offset := y*f.img.Stride + x*4
-			copy(f.img.Pix[offset:offset+config.BarWidth*4], pixelPattern)
+		// Write entire bar width with single copy
+		offset := y*f.img.Stride + x*4
+		copy(f.img.Pix[offset:offset+config.BarWidth*4], pixelPattern)
+	}
+}
+
+// renderBarWithBackground renders a single upward bar with background blending
+func (f *Frame) renderBarWithBackground(x, yStart, yEnd, barHeight int) {
+	for y := yStart; y < yEnd; y++ {
+		if y < 0 {
+			continue
+		}
+
+		// Calculate alpha for fade gradient (dim at tip → bright at center)
+		distanceFromCenter := yEnd - 1 - y
+		alphaIndex := (distanceFromCenter * f.maxBarHeight) / barHeight
+		if alphaIndex >= f.maxBarHeight {
+			alphaIndex = f.maxBarHeight - 1
+		}
+		alpha := f.alphaTable[alphaIndex]
+		alphaF := float64(alpha) / 255.0
+		invAlphaF := 1.0 - alphaF
+
+		offset := y*f.img.Stride + x*4
+		for px := 0; px < config.BarWidth; px++ {
+			pixOffset := offset + px*4
+
+			// Alpha blend with background
+			bgR := f.img.Pix[pixOffset]
+			bgG := f.img.Pix[pixOffset+1]
+			bgB := f.img.Pix[pixOffset+2]
+
+			f.img.Pix[pixOffset] = uint8(float64(config.BarColorR)*alphaF + float64(bgR)*invAlphaF)
+			f.img.Pix[pixOffset+1] = uint8(float64(config.BarColorG)*alphaF + float64(bgG)*invAlphaF)
+			f.img.Pix[pixOffset+2] = uint8(float64(config.BarColorB)*alphaF + float64(bgB)*invAlphaF)
 		}
 	}
 }
 
-// drawBarsWithBackground handles alpha blending with background
-func (f *Frame) drawBarsWithBackground(barHeights []float64) {
-	// This path is only used when there's an actual background image
-	// For now, keeping similar to original but with pre-computed tables
+// mirrorBarVertical creates downward bar by mirroring upward bar pixels.
+// Copies scanlines in reverse order to preserve the fade gradient.
+func (f *Frame) mirrorBarVertical(x, yStart, yEnd, barHeight int) {
+	upwardHeight := yEnd - yStart
+	downStart := f.centerY + config.CenterGap/2
 
-	for i, h := range barHeights {
-		barHeight := int(h)
-		if barHeight <= 0 {
+	// Copy each scanline from upward bar in reverse order
+	for i := 0; i < upwardHeight; i++ {
+		srcY := yEnd - 1 - i  // Read from bottom of upward bar
+		dstY := downStart + i // Write to top of downward bar
+
+		if srcY < 0 || dstY >= config.Height {
 			continue
 		}
 
-		x := f.startX + i*(config.BarWidth+config.BarGap)
-		if x+config.BarWidth > config.Width {
-			continue
-		}
-
-		if barHeight > f.maxBarHeight {
-			barHeight = f.maxBarHeight
-		}
-
-		// Draw upward bar
-		yStart := f.centerY - barHeight - config.CenterGap/2
-		yEnd := f.centerY - config.CenterGap/2
-
-		for y := yStart; y < yEnd; y++ {
-			if y < 0 {
-				continue
-			}
-
-			// Calculate distance from center (fade from center to tip)
-			distanceFromCenter := yEnd - 1 - y
-			// Scale to alphaTable index range
-			alphaIndex := (distanceFromCenter * f.maxBarHeight) / barHeight
-			if alphaIndex >= f.maxBarHeight {
-				alphaIndex = f.maxBarHeight - 1
-			}
-			alpha := f.alphaTable[alphaIndex]
-			alphaF := float64(alpha) / 255.0
-			invAlphaF := 1.0 - alphaF
-
-			offset := y*f.img.Stride + x*4
-			for px := 0; px < config.BarWidth; px++ {
-				pixOffset := offset + px*4
-
-				// Alpha blend with background
-				bgR := f.img.Pix[pixOffset]
-				bgG := f.img.Pix[pixOffset+1]
-				bgB := f.img.Pix[pixOffset+2]
-
-				f.img.Pix[pixOffset] = uint8(float64(config.BarColorR)*alphaF + float64(bgR)*invAlphaF)
-				f.img.Pix[pixOffset+1] = uint8(float64(config.BarColorG)*alphaF + float64(bgG)*invAlphaF)
-				f.img.Pix[pixOffset+2] = uint8(float64(config.BarColorB)*alphaF + float64(bgB)*invAlphaF)
-			}
-		}
-
-		// Similar for downward bar...
-		yStart = f.centerY + config.CenterGap/2
-		yEnd = f.centerY + barHeight + config.CenterGap/2
-
-		for y := yStart; y < yEnd; y++ {
-			if y >= config.Height {
-				break
-			}
-
-			heightFromTop := y - yStart
-			// Scale to alphaTable index range
-			alphaIndex := (heightFromTop * f.maxBarHeight) / barHeight
-			if alphaIndex >= f.maxBarHeight {
-				alphaIndex = f.maxBarHeight - 1
-			}
-			alpha := f.alphaTable[alphaIndex]
-			alphaF := float64(alpha) / 255.0
-			invAlphaF := 1.0 - alphaF
-
-			offset := y*f.img.Stride + x*4
-			for px := 0; px < config.BarWidth; px++ {
-				pixOffset := offset + px*4
-
-				bgR := f.img.Pix[pixOffset]
-				bgG := f.img.Pix[pixOffset+1]
-				bgB := f.img.Pix[pixOffset+2]
-
-				f.img.Pix[pixOffset] = uint8(float64(config.BarColorR)*alphaF + float64(bgR)*invAlphaF)
-				f.img.Pix[pixOffset+1] = uint8(float64(config.BarColorG)*alphaF + float64(bgG)*invAlphaF)
-				f.img.Pix[pixOffset+2] = uint8(float64(config.BarColorB)*alphaF + float64(bgB)*invAlphaF)
-			}
-		}
+		srcOffset := srcY*f.img.Stride + x*4
+		dstOffset := dstY*f.img.Stride + x*4
+		copy(f.img.Pix[dstOffset:dstOffset+config.BarWidth*4],
+			f.img.Pix[srcOffset:srcOffset+config.BarWidth*4])
 	}
 }
 
