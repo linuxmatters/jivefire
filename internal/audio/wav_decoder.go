@@ -48,9 +48,10 @@ func NewWAVDecoder(filename string) (*WAVDecoder, error) {
 
 // ReadChunk reads the next chunk of samples
 func (d *WAVDecoder) ReadChunk(numSamples int) ([]float64, error) {
-	// Create buffer for reading
+	// Create buffer for reading - need numSamples × numChannels for interleaved data
+	bufSize := numSamples * d.numChans
 	intBuf := &audio.IntBuffer{
-		Data: make([]int, numSamples),
+		Data: make([]int, bufSize),
 		Format: &audio.Format{
 			NumChannels: d.numChans,
 			SampleRate:  d.sampleRate,
@@ -67,11 +68,29 @@ func (d *WAVDecoder) ReadChunk(numSamples int) ([]float64, error) {
 		return nil, io.EOF
 	}
 
-	// Convert to float64
-	samples := make([]float64, n)
+	// Convert to float64 and handle stereo/mono
 	maxVal := float64(audio.IntMaxSignedValue(d.bitDepth))
-	for i := 0; i < n; i++ {
-		samples[i] = float64(intBuf.Data[i]) / maxVal
+
+	if d.numChans == 1 {
+		// Mono - direct conversion
+		samples := make([]float64, n)
+		for i := 0; i < n; i++ {
+			samples[i] = float64(intBuf.Data[i]) / maxVal
+		}
+		return samples, nil
+	}
+
+	// Multi-channel - downmix to mono by averaging channels
+	// n samples with d.numChans channels = n/d.numChans time samples
+	numTimeSamples := n / d.numChans
+	samples := make([]float64, numTimeSamples)
+
+	for i := 0; i < numTimeSamples; i++ {
+		var sum float64
+		for ch := 0; ch < d.numChans; ch++ {
+			sum += float64(intBuf.Data[i*d.numChans+ch]) / maxVal
+		}
+		samples[i] = sum / float64(d.numChans)
 	}
 
 	return samples, nil
