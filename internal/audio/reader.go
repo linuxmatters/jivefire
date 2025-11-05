@@ -56,11 +56,6 @@ func (r *StreamingReader) Close() error {
 	return r.decoder.Close()
 }
 
-// NumSamples returns total sample count
-func (r *StreamingReader) NumSamples() int64 {
-	return r.decoder.NumSamples()
-}
-
 // SampleRate returns the sample rate
 func (r *StreamingReader) SampleRate() int {
 	return r.decoder.SampleRate()

@@ -13,19 +13,11 @@ type MP3Decoder struct {
 	decoder     *mp3.Decoder
 	file        *os.File
 	sampleRate  int
-	numSamples  int64
 	numChannels int
-	position    int64
 }
 
 // NewMP3Decoder creates a new MP3 decoder
 func NewMP3Decoder(filename string) (*MP3Decoder, error) {
-	// Use ffmpeg to get accurate metadata (sample rate, channels, duration)
-	metadata, err := GetAudioMetadata(filename)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get audio metadata: %w", err)
-	}
-
 	// Open file for MP3 decoding
 	f, err := os.Open(filename)
 	if err != nil {
@@ -41,27 +33,17 @@ func NewMP3Decoder(filename string) (*MP3Decoder, error) {
 	return &MP3Decoder{
 		decoder:     decoder,
 		file:        f,
-		sampleRate:  metadata.SampleRate,
-		numSamples:  metadata.NumSamples,
-		numChannels: metadata.Channels,
-		position:    0,
+		sampleRate:  decoder.SampleRate(),
+		numChannels: 2, // go-mp3 always outputs stereo
 	}, nil
 }
 
 // ReadChunk reads the next chunk of samples
 func (d *MP3Decoder) ReadChunk(numSamples int) ([]float64, error) {
-	if d.position >= d.numSamples {
-		return nil, io.EOF
-	}
-
-	// Adjust if requesting more samples than available
-	if d.position+int64(numSamples) > d.numSamples {
-		numSamples = int(d.numSamples - d.position)
-	}
-
-	// MP3 decoder outputs 16-bit signed LE samples
-	// We need to read bytes and convert to float64
-	buf := make([]byte, numSamples*2) // 2 bytes per sample
+	// go-mp3 always outputs interleaved stereo: L0 R0 L1 R1 L2 R2 ...
+	// Each channel sample is 16-bit (2 bytes), so 4 bytes per time sample
+	// We need numSamples mono samples, which means reading numSamples stereo frames
+	buf := make([]byte, numSamples*4) // 4 bytes per stereo sample (2 bytes × 2 channels)
 
 	n, err := d.decoder.Read(buf)
 	if err != nil && err != io.EOF {
@@ -72,30 +54,30 @@ func (d *MP3Decoder) ReadChunk(numSamples int) ([]float64, error) {
 		return nil, io.EOF
 	}
 
-	// Convert bytes to float64 samples
-	// MP3 outputs 16-bit signed little-endian
-	samplesRead := n / 2
-	samples := make([]float64, samplesRead)
+	// Convert bytes to float64 samples, converting stereo to mono by averaging
+	// n bytes = n/4 stereo samples = n/4 mono samples after averaging
+	stereoSamplesRead := n / 4
+	samples := make([]float64, stereoSamplesRead)
 
-	for i := 0; i < samplesRead; i++ {
-		// Read 16-bit signed little-endian
-		int16val := int16(buf[i*2]) | (int16(buf[i*2+1]) << 8)
-		// Convert to float64 in range [-1.0, 1.0]
-		samples[i] = float64(int16val) / 32768.0
+	for i := 0; i < stereoSamplesRead; i++ {
+		// Read left channel (16-bit signed little-endian)
+		leftInt16 := int16(buf[i*4]) | (int16(buf[i*4+1]) << 8)
+		left := float64(leftInt16) / 32768.0
+
+		// Read right channel (16-bit signed little-endian)
+		rightInt16 := int16(buf[i*4+2]) | (int16(buf[i*4+3]) << 8)
+		right := float64(rightInt16) / 32768.0
+
+		// Average to mono
+		samples[i] = (left + right) / 2.0
 	}
 
-	d.position += int64(samplesRead)
 	return samples, nil
 }
 
 // SampleRate returns the sample rate
 func (d *MP3Decoder) SampleRate() int {
 	return d.sampleRate
-}
-
-// NumSamples returns the total number of samples
-func (d *MP3Decoder) NumSamples() int64 {
-	return d.numSamples
 }
 
 // NumChannels returns the number of audio channels

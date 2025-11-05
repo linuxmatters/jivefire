@@ -13,19 +13,12 @@ type FLACDecoder struct {
 	stream      *flac.Stream
 	file        *os.File
 	sampleRate  int
-	numSamples  int64
 	numChannels int
-	position    int64
+	buffer      []float64 // Buffered samples from previous FLAC frame
 }
 
 // NewFLACDecoder creates a new FLAC decoder
 func NewFLACDecoder(filename string) (*FLACDecoder, error) {
-	// Use ffmpeg to get accurate metadata (sample rate, channels, duration)
-	metadata, err := GetAudioMetadata(filename)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get audio metadata: %w", err)
-	}
-
 	// Open file for FLAC decoding
 	f, err := os.Open(filename)
 	if err != nil {
@@ -39,28 +32,30 @@ func NewFLACDecoder(filename string) (*FLACDecoder, error) {
 		return nil, fmt.Errorf("failed to create FLAC decoder: %w", err)
 	}
 
+	// Get format info from FLAC StreamInfo block
+	info := stream.Info
+
 	return &FLACDecoder{
 		stream:      stream,
 		file:        f,
-		sampleRate:  metadata.SampleRate,
-		numSamples:  metadata.NumSamples,
-		numChannels: metadata.Channels,
-		position:    0,
+		sampleRate:  int(info.SampleRate),
+		numChannels: int(info.NChannels),
 	}, nil
 }
 
 // ReadChunk reads the next chunk of samples
 func (d *FLACDecoder) ReadChunk(numSamples int) ([]float64, error) {
-	if d.position >= d.numSamples {
-		return nil, io.EOF
-	}
-
-	// Adjust if requesting more samples than available
-	if d.position+int64(numSamples) > d.numSamples {
-		numSamples = int(d.numSamples - d.position)
-	}
-
 	samples := make([]float64, 0, numSamples)
+
+	// First, use any buffered samples from previous frame
+	if len(d.buffer) > 0 {
+		takeFromBuffer := numSamples
+		if takeFromBuffer > len(d.buffer) {
+			takeFromBuffer = len(d.buffer)
+		}
+		samples = append(samples, d.buffer[:takeFromBuffer]...)
+		d.buffer = d.buffer[takeFromBuffer:]
+	}
 
 	// Read FLAC frames until we have enough samples
 	for len(samples) < numSamples {
@@ -72,19 +67,18 @@ func (d *FLACDecoder) ReadChunk(numSamples int) ([]float64, error) {
 				if len(samples) == 0 {
 					return nil, io.EOF
 				}
-				d.position += int64(len(samples))
 				return samples, nil
 			}
 			return nil, fmt.Errorf("failed to parse FLAC frame: %w", err)
 		}
 
 		// FLAC frames contain one subframe per channel
-		// We need to convert to mono by averaging channels or taking first channel
+		// Convert all frame samples to float64 and normalize
 		frameSamples := len(frame.Subframes[0].Samples)
-		
-		for i := 0; i < frameSamples && len(samples) < numSamples; i++ {
+
+		for i := 0; i < frameSamples; i++ {
 			var sample float64
-			
+
 			if len(frame.Subframes) == 1 {
 				// Mono - use directly
 				sample = float64(frame.Subframes[0].Samples[i])
@@ -96,27 +90,29 @@ func (d *FLACDecoder) ReadChunk(numSamples int) ([]float64, error) {
 				}
 				sample = float64(sum) / float64(len(frame.Subframes))
 			}
-			
+
 			// Normalize to [-1.0, 1.0] based on bits per sample
 			// FLAC supports 4-32 bits per sample
 			bitsPerSample := frame.BitsPerSample
 			maxVal := float64(int64(1) << (bitsPerSample - 1))
-			samples = append(samples, sample/maxVal)
+			normalizedSample := sample / maxVal
+
+			// Add to output if we need more samples
+			if len(samples) < numSamples {
+				samples = append(samples, normalizedSample)
+			} else {
+				// Buffer the rest for next call
+				d.buffer = append(d.buffer, normalizedSample)
+			}
 		}
 	}
 
-	d.position += int64(len(samples))
 	return samples, nil
 }
 
 // SampleRate returns the sample rate
 func (d *FLACDecoder) SampleRate() int {
 	return d.sampleRate
-}
-
-// NumSamples returns the total number of samples
-func (d *FLACDecoder) NumSamples() int64 {
-	return d.numSamples
 }
 
 // NumChannels returns the number of audio channels

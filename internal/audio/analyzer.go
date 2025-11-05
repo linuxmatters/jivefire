@@ -51,21 +51,19 @@ func AnalyzeAudio(filename string, progressCb ProgressCallback) (*AudioProfile, 
 	// Open streaming reader
 	reader, err := NewStreamingReader(filename)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open WAV: %w", err)
+		return nil, fmt.Errorf("failed to open audio: %w", err)
 	}
 	defer reader.Close()
 
-	// Calculate number of frames
-	samplesPerFrame := config.SampleRate / config.FPS
-	numFrames := int(reader.NumSamples()) / samplesPerFrame
-	duration := float64(reader.NumSamples()) / float64(reader.SampleRate())
-
 	profile := &AudioProfile{
-		NumFrames:  numFrames,
-		Frames:     make([]FrameAnalysis, numFrames),
+		NumFrames:  0,                        // Will be set after we count actual samples
+		Frames:     make([]FrameAnalysis, 0), // Will grow as we read
 		SampleRate: reader.SampleRate(),
-		Duration:   duration,
+		Duration:   0, // Will be calculated from actual sample count
 	}
+
+	// Calculate frame size
+	samplesPerFrame := config.SampleRate / config.FPS
 
 	// Create FFT processor
 	processor := NewProcessor()
@@ -78,15 +76,29 @@ func AnalyzeAudio(filename string, progressCb ProgressCallback) (*AudioProfile, 
 	fftBuffer := make([]float64, config.FFTSize)
 
 	// Pre-fill buffer with first chunk
-	initialChunk, err := reader.ReadChunk(config.FFTSize)
-	if err != nil {
-		return nil, fmt.Errorf("error reading initial chunk: %w", err)
+	// Keep reading until we get the requested number of samples or EOF
+	var initialSamples []float64
+	for len(initialSamples) < config.FFTSize {
+		chunk, err := reader.ReadChunk(config.FFTSize - len(initialSamples))
+		if err != nil {
+			if err == io.EOF {
+				break // Use what we have
+			}
+			return nil, fmt.Errorf("error reading initial chunk: %w", err)
+		}
+		initialSamples = append(initialSamples, chunk...)
 	}
-	copy(fftBuffer, initialChunk)
+
+	if len(initialSamples) == 0 {
+		return nil, fmt.Errorf("no audio data in file")
+	}
+
+	copy(fftBuffer, initialSamples)
 
 	startTime := time.Now()
+	frameNum := 0
 
-	for frameNum := 0; frameNum < numFrames; frameNum++ {
+	for {
 		// Use current buffer for FFT (copy to ensure we have full FFTSize)
 		chunk := make([]float64, config.FFTSize)
 		copy(chunk, fftBuffer)
@@ -96,7 +108,7 @@ func AnalyzeAudio(filename string, progressCb ProgressCallback) (*AudioProfile, 
 
 		// Analyze frequency bins
 		analysis := analyzeFrame(coeffs, chunk)
-		profile.Frames[frameNum] = analysis
+		profile.Frames = append(profile.Frames, analysis)
 
 		// Track global statistics
 		if analysis.PeakMagnitude > maxPeak {
@@ -104,8 +116,10 @@ func AnalyzeAudio(filename string, progressCb ProgressCallback) (*AudioProfile, 
 		}
 		sumRMS += analysis.RMSLevel
 
+		frameNum++
+
 		// Send progress update via callback (throttle to every 3 frames for performance)
-		if progressCb != nil && (frameNum%3 == 0 || frameNum == numFrames-1) {
+		if progressCb != nil && frameNum%3 == 0 {
 			// Convert bar magnitudes to slice for progress update
 			barHeights := make([]float64, config.NumBars)
 			for i := 0; i < config.NumBars; i++ {
@@ -113,28 +127,58 @@ func AnalyzeAudio(filename string, progressCb ProgressCallback) (*AudioProfile, 
 			}
 
 			elapsed := time.Since(startTime)
-			progressCb(frameNum+1, numFrames, analysis.RMSLevel, analysis.PeakMagnitude, barHeights, elapsed)
+			// No total frames estimate available during first pass
+			progressCb(frameNum, 0, analysis.RMSLevel, analysis.PeakMagnitude, barHeights, elapsed)
 		}
 
 		// Advance sliding buffer for next frame
 		// Read samplesPerFrame new samples and shift buffer
-		if frameNum < numFrames-1 { // Don't read past end
-			newSamples, err := reader.ReadChunk(samplesPerFrame)
-			if err != nil && err != io.EOF {
+		// Keep reading until we get the requested number of samples or EOF
+		newSamples := make([]float64, 0, samplesPerFrame)
+		for len(newSamples) < samplesPerFrame {
+			chunk, err := reader.ReadChunk(samplesPerFrame - len(newSamples))
+			if err != nil {
+				if err == io.EOF {
+					// If we got some samples, use them; otherwise we're done
+					if len(newSamples) == 0 {
+						// Send final progress update
+						if progressCb != nil {
+							barHeights := make([]float64, config.NumBars)
+							for i := 0; i < config.NumBars; i++ {
+								barHeights[i] = analysis.BarMagnitudes[i]
+							}
+							elapsed := time.Since(startTime)
+							progressCb(frameNum, frameNum, analysis.RMSLevel, analysis.PeakMagnitude, barHeights, elapsed)
+						}
+						break // Finished reading all audio
+					}
+					// Got partial frame at end of file, use what we have
+					break
+				}
 				return nil, fmt.Errorf("error reading audio at frame %d: %w", frameNum, err)
 			}
-
-			// Shift buffer left by samplesPerFrame, append new samples
-			copy(fftBuffer, fftBuffer[samplesPerFrame:])
-			if len(newSamples) > 0 {
-				copy(fftBuffer[config.FFTSize-samplesPerFrame:], newSamples)
-			}
+			newSamples = append(newSamples, chunk...)
 		}
+
+		// If we got no new samples, we're done
+		if len(newSamples) == 0 {
+			break
+		}
+
+		// Shift buffer left by samplesPerFrame, append new samples
+		copy(fftBuffer, fftBuffer[samplesPerFrame:])
+		copy(fftBuffer[config.FFTSize-samplesPerFrame:], newSamples)
 	}
+
+	// Set actual frame count and duration
+	// Duration is based on the number of frames, not total samples read
+	// Each frame represents samplesPerFrame of actual audio advancement
+	profile.NumFrames = frameNum
+	profile.Duration = float64(frameNum*samplesPerFrame) / float64(reader.SampleRate())
 
 	// Calculate global statistics
 	profile.GlobalPeak = maxPeak
-	profile.GlobalRMS = sumRMS / float64(numFrames)
+	profile.GlobalRMS = sumRMS / float64(profile.NumFrames)
 
 	// Avoid division by zero
 	if profile.GlobalRMS > 0 {

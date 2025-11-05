@@ -576,14 +576,14 @@ func extractFloatsWithDownmix(frame *ffmpeg.AVFrame, channels int) ([]float32, e
 			rightSlice := (*[1 << 30]byte)(unsafe.Pointer(rightPtr))[: nbSamples*4 : nbSamples*4]
 			for i := 0; i < nbSamples; i++ {
 				// Read left channel
-				leftVal := int32(leftSlice[i*4]) | 
-					int32(leftSlice[i*4+1])<<8 | 
-					int32(leftSlice[i*4+2])<<16 | 
+				leftVal := int32(leftSlice[i*4]) |
+					int32(leftSlice[i*4+1])<<8 |
+					int32(leftSlice[i*4+2])<<16 |
 					int32(leftSlice[i*4+3])<<24
 				// Read right channel
-				rightVal := int32(rightSlice[i*4]) | 
-					int32(rightSlice[i*4+1])<<8 | 
-					int32(rightSlice[i*4+2])<<16 | 
+				rightVal := int32(rightSlice[i*4]) |
+					int32(rightSlice[i*4+1])<<8 |
+					int32(rightSlice[i*4+2])<<16 |
 					int32(rightSlice[i*4+3])<<24
 				// Average and convert to float32
 				samples[i] = (float32(leftVal) + float32(rightVal)) / (2 * 2147483648.0)
@@ -648,9 +648,9 @@ func extractFloatsWithDownmix(frame *ffmpeg.AVFrame, channels int) ([]float32, e
 				// Mono
 				dataSlice := (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[: nbSamples*4 : nbSamples*4]
 				for i := 0; i < nbSamples; i++ {
-					val := int32(dataSlice[i*4]) | 
-						int32(dataSlice[i*4+1])<<8 | 
-						int32(dataSlice[i*4+2])<<16 | 
+					val := int32(dataSlice[i*4]) |
+						int32(dataSlice[i*4+1])<<8 |
+						int32(dataSlice[i*4+2])<<16 |
 						int32(dataSlice[i*4+3])<<24
 					samples[i] = float32(val) / 2147483648.0 // 2^31
 				}
@@ -659,14 +659,14 @@ func extractFloatsWithDownmix(frame *ffmpeg.AVFrame, channels int) ([]float32, e
 				dataSlice := (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[: nbSamples*channels*4 : nbSamples*channels*4]
 				for i := 0; i < nbSamples; i++ {
 					// Read left channel
-					leftVal := int32(dataSlice[i*8]) | 
-						int32(dataSlice[i*8+1])<<8 | 
-						int32(dataSlice[i*8+2])<<16 | 
+					leftVal := int32(dataSlice[i*8]) |
+						int32(dataSlice[i*8+1])<<8 |
+						int32(dataSlice[i*8+2])<<16 |
 						int32(dataSlice[i*8+3])<<24
 					// Read right channel
-					rightVal := int32(dataSlice[i*8+4]) | 
-						int32(dataSlice[i*8+5])<<8 | 
-						int32(dataSlice[i*8+6])<<16 | 
+					rightVal := int32(dataSlice[i*8+4]) |
+						int32(dataSlice[i*8+5])<<8 |
+						int32(dataSlice[i*8+6])<<16 |
 						int32(dataSlice[i*8+7])<<24
 					// Average and convert
 					samples[i] = (float32(leftVal) + float32(rightVal)) / (2 * 2147483648.0)
@@ -718,9 +718,9 @@ func extractFloatsWithDownmix(frame *ffmpeg.AVFrame, channels int) ([]float32, e
 		case 7: // AVSampleFmtS32P - planar 32-bit (mono, FLAC)
 			dataSlice := (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[: nbSamples*4 : nbSamples*4]
 			for i := 0; i < nbSamples; i++ {
-				val := int32(dataSlice[i*4]) | 
-					int32(dataSlice[i*4+1])<<8 | 
-					int32(dataSlice[i*4+2])<<16 | 
+				val := int32(dataSlice[i*4]) |
+					int32(dataSlice[i*4+1])<<8 |
+					int32(dataSlice[i*4+2])<<16 |
 					int32(dataSlice[i*4+3])<<24
 				samples[i] = float32(val) / 2147483648.0 // 2^31
 			}

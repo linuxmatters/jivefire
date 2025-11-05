@@ -15,9 +15,7 @@ type WAVDecoder struct {
 	file       *os.File
 	sampleRate int
 	bitDepth   int
-	numSamples int64
 	numChans   int
-	position   int64
 }
 
 // NewWAVDecoder creates a new WAV decoder
@@ -39,33 +37,17 @@ func NewWAVDecoder(filename string) (*WAVDecoder, error) {
 		return nil, fmt.Errorf("failed to seek to PCM data: %w", err)
 	}
 
-	// Calculate total samples from file size and format
-	bytesPerSample := int64(decoder.BitDepth / 8)
-	numChannels := int64(decoder.NumChans)
-	totalSamples := int64(decoder.PCMLen()) / (bytesPerSample * numChannels)
-
 	return &WAVDecoder{
 		decoder:    decoder,
 		file:       f,
 		sampleRate: int(decoder.SampleRate),
 		bitDepth:   int(decoder.BitDepth),
-		numSamples: totalSamples,
 		numChans:   int(decoder.NumChans),
-		position:   0,
 	}, nil
 }
 
 // ReadChunk reads the next chunk of samples
 func (d *WAVDecoder) ReadChunk(numSamples int) ([]float64, error) {
-	if d.position >= d.numSamples {
-		return nil, io.EOF
-	}
-
-	// Adjust if requesting more samples than available
-	if d.position+int64(numSamples) > d.numSamples {
-		numSamples = int(d.numSamples - d.position)
-	}
-
 	// Create buffer for reading
 	intBuf := &audio.IntBuffer{
 		Data: make([]int, numSamples),
@@ -92,18 +74,12 @@ func (d *WAVDecoder) ReadChunk(numSamples int) ([]float64, error) {
 		samples[i] = float64(intBuf.Data[i]) / maxVal
 	}
 
-	d.position += int64(n)
 	return samples, nil
 }
 
 // SampleRate returns the sample rate
 func (d *WAVDecoder) SampleRate() int {
 	return d.sampleRate
-}
-
-// NumSamples returns the total number of samples
-func (d *WAVDecoder) NumSamples() int64 {
-	return d.numSamples
 }
 
 // NumChannels returns the number of audio channels

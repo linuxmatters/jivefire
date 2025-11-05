@@ -11,10 +11,6 @@ type AudioDecoder interface {
 	// SampleRate returns the audio sample rate in Hz
 	SampleRate() int
 
-	// NumSamples returns the total number of samples in the audio file
-	// Returns 0 if the length is unknown (e.g., streaming)
-	NumSamples() int64
-
 	// NumChannels returns the number of audio channels (1=mono, 2=stereo)
 	NumChannels() int
 
