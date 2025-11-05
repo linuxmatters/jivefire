@@ -295,8 +295,10 @@ func (e *Encoder) initializeAudio() error {
 	// Check if we support this sample format
 	supportedFormats := map[int32]string{
 		1: "16-bit signed integer",
+		2: "32-bit signed integer", // FLAC uses 32-bit int containers for various bit depths
 		3: "32-bit float",
 		6: "16-bit signed integer planar",
+		7: "32-bit signed integer planar", // FLAC planar
 		8: "32-bit float planar",
 	}
 
@@ -307,18 +309,14 @@ func (e *Encoder) initializeAudio() error {
 		switch sampleFmtInt {
 		case 0:
 			formatName = "8-bit unsigned"
-		case 2:
-			formatName = "32-bit signed integer (24-bit audio)"
 		case 4:
 			formatName = "64-bit float"
 		case 5:
 			formatName = "8-bit unsigned planar"
-		case 7:
-			formatName = "32-bit signed integer planar"
 		case 9:
 			formatName = "64-bit float planar"
 		}
-		return fmt.Errorf("unsupported audio format: %s (format %d). Supported formats: 16-bit PCM and 32-bit float", formatName, sampleFmtInt)
+		return fmt.Errorf("unsupported audio format: %s (format %d). Supported formats: 16-bit PCM, 32-bit integer, and 32-bit float", formatName, sampleFmtInt)
 	}
 
 	// Check channel count - we support mono and stereo input
@@ -543,8 +541,10 @@ func extractFloatsWithDownmix(frame *ffmpeg.AVFrame, channels int) ([]float32, e
 
 	// Check the sample format
 	// AVSampleFmtS16 = 1 (signed 16-bit interleaved)
+	// AVSampleFmtS32 = 2 (signed 32-bit interleaved, FLAC)
 	// AVSampleFmtFlt = 3 (float interleaved)
 	// AVSampleFmtS16P = 6 (signed 16-bit planar)
+	// AVSampleFmtS32P = 7 (signed 32-bit planar, FLAC)
 	// AVSampleFmtFltp = 8 (float planar)
 
 	// Determine if format is planar
@@ -569,6 +569,24 @@ func extractFloatsWithDownmix(frame *ffmpeg.AVFrame, channels int) ([]float32, e
 				rightVal := int16(rightSlice[i*2]) | int16(rightSlice[i*2+1])<<8
 				// Average and convert to float32
 				samples[i] = (float32(leftVal) + float32(rightVal)) / (2 * 32768.0)
+			}
+
+		case 7: // AVSampleFmtS32P - planar 32-bit signed (FLAC)
+			leftSlice := (*[1 << 30]byte)(unsafe.Pointer(leftPtr))[: nbSamples*4 : nbSamples*4]
+			rightSlice := (*[1 << 30]byte)(unsafe.Pointer(rightPtr))[: nbSamples*4 : nbSamples*4]
+			for i := 0; i < nbSamples; i++ {
+				// Read left channel
+				leftVal := int32(leftSlice[i*4]) | 
+					int32(leftSlice[i*4+1])<<8 | 
+					int32(leftSlice[i*4+2])<<16 | 
+					int32(leftSlice[i*4+3])<<24
+				// Read right channel
+				rightVal := int32(rightSlice[i*4]) | 
+					int32(rightSlice[i*4+1])<<8 | 
+					int32(rightSlice[i*4+2])<<16 | 
+					int32(rightSlice[i*4+3])<<24
+				// Average and convert to float32
+				samples[i] = (float32(leftVal) + float32(rightVal)) / (2 * 2147483648.0)
 			}
 
 		case 8: // AVSampleFmtFltp - planar float
@@ -625,6 +643,36 @@ func extractFloatsWithDownmix(frame *ffmpeg.AVFrame, channels int) ([]float32, e
 				}
 			}
 
+		case 2: // AVSampleFmtS32 - interleaved 32-bit signed (FLAC)
+			if channels == 1 {
+				// Mono
+				dataSlice := (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[: nbSamples*4 : nbSamples*4]
+				for i := 0; i < nbSamples; i++ {
+					val := int32(dataSlice[i*4]) | 
+						int32(dataSlice[i*4+1])<<8 | 
+						int32(dataSlice[i*4+2])<<16 | 
+						int32(dataSlice[i*4+3])<<24
+					samples[i] = float32(val) / 2147483648.0 // 2^31
+				}
+			} else {
+				// Stereo interleaved: L R L R L R ...
+				dataSlice := (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[: nbSamples*channels*4 : nbSamples*channels*4]
+				for i := 0; i < nbSamples; i++ {
+					// Read left channel
+					leftVal := int32(dataSlice[i*8]) | 
+						int32(dataSlice[i*8+1])<<8 | 
+						int32(dataSlice[i*8+2])<<16 | 
+						int32(dataSlice[i*8+3])<<24
+					// Read right channel
+					rightVal := int32(dataSlice[i*8+4]) | 
+						int32(dataSlice[i*8+5])<<8 | 
+						int32(dataSlice[i*8+6])<<16 | 
+						int32(dataSlice[i*8+7])<<24
+					// Average and convert
+					samples[i] = (float32(leftVal) + float32(rightVal)) / (2 * 2147483648.0)
+				}
+			}
+
 		case 3: // AVSampleFmtFlt - interleaved float
 			if channels == 1 {
 				// Mono
@@ -659,12 +707,22 @@ func extractFloatsWithDownmix(frame *ffmpeg.AVFrame, channels int) ([]float32, e
 				}
 			}
 
-		// For mono planar formats (6, 8), just treat as mono
+		// For mono planar formats (6, 7, 8), just treat as mono
 		case 6: // AVSampleFmtS16P - planar 16-bit (mono)
 			dataSlice := (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[: nbSamples*2 : nbSamples*2]
 			for i := 0; i < nbSamples; i++ {
 				val := int16(dataSlice[i*2]) | int16(dataSlice[i*2+1])<<8
 				samples[i] = float32(val) / 32768.0
+			}
+
+		case 7: // AVSampleFmtS32P - planar 32-bit (mono, FLAC)
+			dataSlice := (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[: nbSamples*4 : nbSamples*4]
+			for i := 0; i < nbSamples; i++ {
+				val := int32(dataSlice[i*4]) | 
+					int32(dataSlice[i*4+1])<<8 | 
+					int32(dataSlice[i*4+2])<<16 | 
+					int32(dataSlice[i*4+3])<<24
+				samples[i] = float32(val) / 2147483648.0 // 2^31
 			}
 
 		case 8: // AVSampleFmtFltp - planar float (mono)

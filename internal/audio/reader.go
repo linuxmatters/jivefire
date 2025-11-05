@@ -12,7 +12,7 @@ type StreamingReader struct {
 }
 
 // NewStreamingReader creates a streaming audio reader for the given file
-// Automatically detects format based on file extension (.wav, .mp3)
+// Automatically detects format based on file extension (.wav, .mp3, .flac)
 func NewStreamingReader(filename string) (*StreamingReader, error) {
 	ext := strings.ToLower(filepath.Ext(filename))
 
@@ -24,8 +24,10 @@ func NewStreamingReader(filename string) (*StreamingReader, error) {
 		decoder, err = NewWAVDecoder(filename)
 	case ".mp3":
 		decoder, err = NewMP3Decoder(filename)
+	case ".flac":
+		decoder, err = NewFLACDecoder(filename)
 	default:
-		return nil, fmt.Errorf("unsupported audio format: %s (supported: .wav, .mp3)", ext)
+		return nil, fmt.Errorf("unsupported audio format: %s (supported: .wav, .mp3, .flac)", ext)
 	}
 
 	if err != nil {
