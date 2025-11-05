@@ -55,10 +55,11 @@ type pass2Model struct {
 	quitting        bool          // Flag to indicate we're in quit delay
 	cachedPreview   string        // Cached rendered preview string
 	cachedFrameNum  int           // Frame number of cached preview
+	noPreview       bool          // Disable video preview for better batch performance
 }
 
 // NewPass2Model creates a new Pass 2 UI model
-func NewPass2Model() tea.Model {
+func NewPass2Model(noPreview bool) tea.Model {
 	p := progress.New(
 		progress.WithDefaultGradient(),
 		progress.WithWidth(40),
@@ -71,6 +72,7 @@ func NewPass2Model() tea.Model {
 		minDisplayTime:  500 * time.Millisecond, // Show UI for at least 0.5 seconds
 		completionDelay: 2 * time.Second,        // Show completion for 2 seconds
 		quitting:        false,
+		noPreview:       noPreview,
 	}
 }
 
@@ -248,19 +250,22 @@ func (m *pass2Model) renderProgress() string {
 			rightCol.String()))
 		s.WriteString("\n")
 
-		// Video preview - regenerate if new frame data available, otherwise use cached
-		if m.lastUpdate.FrameData != nil && m.lastUpdate.Frame != m.cachedFrameNum {
-			// New frame data available, regenerate preview
-			config := DefaultPreviewConfig()
-			preview := DownsampleFrame(m.lastUpdate.FrameData, config)
-			m.cachedPreview = RenderPreview(preview)
-			m.cachedFrameNum = m.lastUpdate.Frame
-		}
+		// Video preview - only render if not disabled
+		if !m.noPreview {
+			// Video preview - regenerate if new frame data available, otherwise use cached
+			if m.lastUpdate.FrameData != nil && m.lastUpdate.Frame != m.cachedFrameNum {
+				// New frame data available, regenerate preview
+				config := DefaultPreviewConfig()
+				preview := DownsampleFrame(m.lastUpdate.FrameData, config)
+				m.cachedPreview = RenderPreview(preview)
+				m.cachedFrameNum = m.lastUpdate.Frame
+			}
 
-		// Always display cached preview once we have one (prevents flickering)
-		if m.cachedPreview != "" {
-			s.WriteString("\n")
-			s.WriteString(m.cachedPreview)
+			// Always display cached preview once we have one (prevents flickering)
+			if m.cachedPreview != "" {
+				s.WriteString("\n")
+				s.WriteString(m.cachedPreview)
+			}
 		}
 	}
 

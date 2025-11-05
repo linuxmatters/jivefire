@@ -54,6 +54,11 @@ test-wav: build
     ./jivefire --episode="0" --title "Introducing Linux Matters Podcast" testdata/LMP0.wav testdata/LMP0-wav.mp4
     ./jivefire --episode="0" --title "Introducing Linux Matters Podcast" testdata/LMP0-stereo.wav testdata/LMP0-wav-stereo.mp4
 
+# Test preview performance comparison
+test-preview: build
+    time ./jivefire --episode="0" --title "Test With Preview" testdata/LMP0.mp3 testdata/LMP0-mp3.mp4
+    time ./jivefire --episode="0" --title "Test No Preview" --no-preview testdata/LMP0.mp3 testdata/LMP0-mp3.mp4
+
 # Run tests
 test:
     go test ./...

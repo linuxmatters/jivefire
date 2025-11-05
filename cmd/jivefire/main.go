@@ -21,11 +21,12 @@ import (
 const version = "0.0.1"
 
 var CLI struct {
-	Input   string `arg:"" name:"input" help:"Input WAV file" optional:""`
-	Output  string `arg:"" name:"output" help:"Output MP4 file" optional:""`
-	Episode int    `help:"Episode number" default:"0"`
-	Title   string `help:"Podcast title" default:"Podcast Title"`
-	Version bool   `help:"Show version information"`
+	Input     string `arg:"" name:"input" help:"Input WAV file" optional:""`
+	Output    string `arg:"" name:"output" help:"Output MP4 file" optional:""`
+	Episode   int    `help:"Episode number" default:"0"`
+	Title     string `help:"Podcast title" default:"Podcast Title"`
+	NoPreview bool   `help:"Disable video preview during encoding"`
+	Version   bool   `help:"Show version information"`
 }
 
 func main() {
@@ -57,14 +58,15 @@ func main() {
 
 	inputFile := CLI.Input
 	outputFile := CLI.Output
+	noPreview := CLI.NoPreview
 
 	_ = ctx // Kong context available for future use
 
 	// Generate video using 2-pass streaming approach
-	generateVideo(inputFile, outputFile)
+	generateVideo(inputFile, outputFile, noPreview)
 }
 
-func generateVideo(inputFile string, outputFile string) {
+func generateVideo(inputFile string, outputFile string, noPreview bool) {
 	// ============================================================================
 	// PASS 1: Analyze audio to calculate optimal parameters
 	// ============================================================================
@@ -122,7 +124,7 @@ func generateVideo(inputFile string, outputFile string) {
 	// ============================================================================
 
 	// Create Bubbletea program for Pass 2
-	pass2Model := ui.NewPass2Model()
+	pass2Model := ui.NewPass2Model(noPreview)
 	p2 := tea.NewProgram(pass2Model)
 
 	// Open streaming reader for Pass 2
@@ -327,8 +329,9 @@ func generateVideo(inputFile string, outputFile string) {
 
 			// Send progress update every 3 frames
 			// Send frame data for preview every 6 frames (5Hz at 30fps - good balance)
+			// Skip frame data entirely if preview is disabled for better batch performance
 			var frameData *image.RGBA
-			if frameNum%6 == 0 {
+			if !noPreview && frameNum%6 == 0 {
 				frameData = img
 			}
 
