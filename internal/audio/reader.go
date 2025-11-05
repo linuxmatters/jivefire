@@ -2,124 +2,44 @@ package audio
 
 import (
 	"fmt"
-	"io"
-	"os"
-
-	"github.com/go-audio/audio"
-	"github.com/go-audio/wav"
+	"path/filepath"
+	"strings"
 )
 
-// ReadWAV reads a WAV file and returns samples as float64 slice
-func ReadWAV(filename string) ([]float64, error) {
-	f, err := os.Open(filename)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	decoder := wav.NewDecoder(f)
-	if !decoder.IsValidFile() {
-		return nil, fmt.Errorf("invalid WAV file")
-	}
-
-	buf, err := decoder.FullPCMBuffer()
-	if err != nil {
-		return nil, err
-	}
-
-	// Convert to float64
-	samples := make([]float64, len(buf.Data))
-	for i, s := range buf.Data {
-		samples[i] = float64(s) / float64(audio.IntMaxSignedValue(int(decoder.BitDepth)))
-	}
-
-	return samples, nil
-}
-
-// StreamingReader provides chunk-based WAV reading
+// StreamingReader provides chunk-based audio reading for multiple formats
 type StreamingReader struct {
-	decoder    *wav.Decoder
-	file       *os.File
-	sampleRate int
-	bitDepth   int
-	numSamples int64
-	position   int64
+	decoder AudioDecoder
 }
 
-// NewStreamingReader creates a streaming WAV reader
+// NewStreamingReader creates a streaming audio reader for the given file
+// Automatically detects format based on file extension (.wav, .mp3)
 func NewStreamingReader(filename string) (*StreamingReader, error) {
-	f, err := os.Open(filename)
+	ext := strings.ToLower(filepath.Ext(filename))
+
+	var decoder AudioDecoder
+	var err error
+
+	switch ext {
+	case ".wav":
+		decoder, err = NewWAVDecoder(filename)
+	case ".mp3":
+		decoder, err = NewMP3Decoder(filename)
+	default:
+		return nil, fmt.Errorf("unsupported audio format: %s (supported: .wav, .mp3)", ext)
+	}
+
 	if err != nil {
 		return nil, err
 	}
-
-	decoder := wav.NewDecoder(f)
-	if !decoder.IsValidFile() {
-		f.Close()
-		return nil, fmt.Errorf("invalid WAV file")
-	}
-
-	// Get format info without reading all samples
-	if err := decoder.FwdToPCM(); err != nil {
-		f.Close()
-		return nil, fmt.Errorf("failed to seek to PCM data: %w", err)
-	}
-
-	// Calculate total samples from file size and format
-	// PCMLen gives us the length of PCM data in bytes
-	bytesPerSample := int64(decoder.BitDepth / 8)
-	numChannels := int64(decoder.NumChans)
-	totalSamples := int64(decoder.PCMLen()) / (bytesPerSample * numChannels)
 
 	return &StreamingReader{
-		decoder:    decoder,
-		file:       f,
-		sampleRate: int(decoder.SampleRate),
-		bitDepth:   int(decoder.BitDepth),
-		numSamples: totalSamples,
-		position:   0,
+		decoder: decoder,
 	}, nil
 }
 
 // ReadChunk reads next chunk of samples, returns nil when EOF
 func (r *StreamingReader) ReadChunk(numSamples int) ([]float64, error) {
-	if r.position >= r.numSamples {
-		return nil, io.EOF
-	}
-
-	// Adjust if requesting more samples than available
-	if r.position+int64(numSamples) > r.numSamples {
-		numSamples = int(r.numSamples - r.position)
-	}
-
-	// Create buffer for reading
-	intBuf := &audio.IntBuffer{
-		Data: make([]int, numSamples),
-		Format: &audio.Format{
-			NumChannels: int(r.decoder.NumChans),
-			SampleRate:  int(r.decoder.SampleRate),
-		},
-	}
-
-	// Read PCM data
-	n, err := r.decoder.PCMBuffer(intBuf)
-	if err != nil && err != io.EOF {
-		return nil, fmt.Errorf("failed to read PCM buffer: %w", err)
-	}
-
-	if n == 0 {
-		return nil, io.EOF
-	}
-
-	// Convert to float64
-	samples := make([]float64, n)
-	maxVal := float64(audio.IntMaxSignedValue(r.bitDepth))
-	for i := 0; i < n; i++ {
-		samples[i] = float64(intBuf.Data[i]) / maxVal
-	}
-
-	r.position += int64(n)
-	return samples, nil
+	return r.decoder.ReadChunk(numSamples)
 }
 
 // SeekToSample repositions reader to sample position
@@ -131,23 +51,20 @@ func (r *StreamingReader) SeekToSample(samplePos int64) error {
 
 // Close closes the underlying file
 func (r *StreamingReader) Close() error {
-	if r.file != nil {
-		return r.file.Close()
-	}
-	return nil
+	return r.decoder.Close()
 }
 
 // NumSamples returns total sample count
 func (r *StreamingReader) NumSamples() int64 {
-	return r.numSamples
+	return r.decoder.NumSamples()
 }
 
 // SampleRate returns the sample rate
 func (r *StreamingReader) SampleRate() int {
-	return r.sampleRate
+	return r.decoder.SampleRate()
 }
 
 // NumChannels returns the number of audio channels
 func (r *StreamingReader) NumChannels() int {
-	return int(r.decoder.NumChans)
+	return r.decoder.NumChannels()
 }
