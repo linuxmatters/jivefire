@@ -15,7 +15,9 @@ import (
 )
 
 //go:embed assets/bg.png
+//go:embed assets/thumb.png
 //go:embed assets/Poppins-Regular.ttf
+//go:embed assets/Poppins-Bold.ttf
 var embeddedAssets embed.FS
 
 // LoadBackgroundImage loads and scales the embedded PNG background image
