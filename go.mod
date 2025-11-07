@@ -4,6 +4,7 @@ go 1.24.0
 
 require (
 	github.com/alecthomas/kong v1.12.1
+	github.com/argusdusty/gofft v1.2.1
 	github.com/charmbracelet/bubbles v0.21.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
@@ -14,11 +15,9 @@ require (
 	github.com/hajimehoshi/go-mp3 v0.3.4
 	github.com/mewkiz/flac v1.0.13
 	golang.org/x/image v0.32.0
-	gonum.org/v1/gonum v0.16.0
 )
 
 require (
-	github.com/argusdusty/gofft v1.2.1 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/charmbracelet/colorprofile v0.2.3-0.20250311203215-f60798e515dc // indirect
 	github.com/charmbracelet/harmonica v0.2.0 // indirect
