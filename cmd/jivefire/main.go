@@ -6,6 +6,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/alecthomas/kong"
@@ -78,9 +79,11 @@ func main() {
 }
 
 func generateVideo(inputFile string, outputFile string, channels int, noPreview bool) {
-	// ============================================================================
-	// PASS 1: Analyze audio to calculate optimal parameters
-	// ============================================================================
+	thumbnailPath := strings.Replace(outputFile, ".mp4", ".png", 1)
+	if err := renderer.GenerateThumbnail(thumbnailPath, CLI.Title); err != nil {
+		cli.PrintError(fmt.Sprintf("failed to generate thumbnail: %v", err))
+		os.Exit(1)
+	}
 
 	// Create Bubbletea program for Pass 1
 	model := ui.NewPass1Model()
@@ -129,10 +132,6 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 		cli.PrintError(fmt.Sprintf("analyzing audio: %v", analysisErr))
 		os.Exit(1)
 	}
-
-	// ============================================================================
-	// PASS 2: Render video with Bubbletea UI
-	// ============================================================================
 
 	// Create Bubbletea program for Pass 2
 	pass2Model := ui.NewPass2Model(noPreview)
