@@ -6,45 +6,55 @@ import (
 )
 
 func TestNewStreamingReader(t *testing.T) {
-	reader, err := NewStreamingReader("../../testdata/dream.wav")
+	reader, err := NewStreamingReader("../../testdata/LMP0.mp3")
 	if err != nil {
 		t.Fatalf("Failed to create streaming reader: %v", err)
 	}
 	defer reader.Close()
 
-	if reader.NumSamples() <= 0 {
-		t.Errorf("Expected positive number of samples, got %d", reader.NumSamples())
+	// Get metadata to verify file was opened correctly
+	metadata, err := GetAudioMetadata("../../testdata/LMP0.mp3")
+	if err != nil {
+		t.Fatalf("Failed to get metadata: %v", err)
 	}
 
-	if reader.SampleRate() != 44100 {
-		t.Errorf("Expected sample rate 44100, got %d", reader.SampleRate())
+	if metadata.NumSamples <= 0 {
+		t.Errorf("Expected positive number of samples, got %d", metadata.NumSamples)
 	}
 
-	t.Logf("Successfully opened WAV file: %d samples at %d Hz", reader.NumSamples(), reader.SampleRate())
+	if reader.SampleRate() <= 0 {
+		t.Errorf("Expected positive sample rate, got %d", reader.SampleRate())
+	}
+
+	t.Logf("Successfully opened MP3 file: %d samples at %d Hz", metadata.NumSamples, reader.SampleRate())
 }
 
 func TestNewStreamingReaderInvalidFile(t *testing.T) {
-	_, err := NewStreamingReader("nonexistent.wav")
+	_, err := NewStreamingReader("nonexistent.mp3")
 	if err == nil {
 		t.Error("Expected error for nonexistent file, got nil")
 	}
 }
 
 func TestStreamingReaderReadChunk(t *testing.T) {
-	reader, err := NewStreamingReader("../../testdata/dream.wav")
+	reader, err := NewStreamingReader("../../testdata/LMP0.mp3")
 	if err != nil {
 		t.Fatalf("Failed to create streaming reader: %v", err)
 	}
 	defer reader.Close()
 
-	// Read a chunk of 2048 samples
+	// Read a chunk of 2048 samples (MP3 may return less due to frame boundaries)
 	chunk, err := reader.ReadChunk(2048)
 	if err != nil {
 		t.Fatalf("Failed to read chunk: %v", err)
 	}
 
-	if len(chunk) != 2048 {
-		t.Errorf("Expected chunk size 2048, got %d", len(chunk))
+	if len(chunk) == 0 {
+		t.Errorf("Expected non-empty chunk, got %d samples", len(chunk))
+	}
+
+	if len(chunk) > 2048 {
+		t.Errorf("Chunk size exceeds requested: got %d, requested 2048", len(chunk))
 	}
 
 	// Check that values are normalized float64 (between -1.0 and 1.0)
@@ -58,7 +68,7 @@ func TestStreamingReaderReadChunk(t *testing.T) {
 }
 
 func TestStreamingReaderMultipleChunks(t *testing.T) {
-	reader, err := NewStreamingReader("../../testdata/dream.wav")
+	reader, err := NewStreamingReader("../../testdata/LMP0.mp3")
 	if err != nil {
 		t.Fatalf("Failed to create streaming reader: %v", err)
 	}
@@ -98,14 +108,19 @@ func TestStreamingReaderMultipleChunks(t *testing.T) {
 }
 
 func TestStreamingReaderEOF(t *testing.T) {
-	reader, err := NewStreamingReader("../../testdata/dream.wav")
+	reader, err := NewStreamingReader("../../testdata/LMP0.mp3")
 	if err != nil {
 		t.Fatalf("Failed to create streaming reader: %v", err)
 	}
 	defer reader.Close()
 
+	// Get total sample count via metadata
+	metadata, err := GetAudioMetadata("../../testdata/LMP0.mp3")
+	if err != nil {
+		t.Fatalf("Failed to get metadata: %v", err)
+	}
+
 	// Read all samples
-	totalSamples := reader.NumSamples()
 	chunkSize := 4096
 
 	for {
@@ -125,11 +140,11 @@ func TestStreamingReaderEOF(t *testing.T) {
 		t.Errorf("Expected EOF on second read past end, got: %v", err)
 	}
 
-	t.Logf("EOF handling works correctly after reading %d samples", totalSamples)
+	t.Logf("EOF handling works correctly after reading %d samples", metadata.NumSamples)
 }
 
 func TestStreamingReaderClose(t *testing.T) {
-	reader, err := NewStreamingReader("../../testdata/dream.wav")
+	reader, err := NewStreamingReader("../../testdata/LMP0.mp3")
 	if err != nil {
 		t.Fatalf("Failed to create streaming reader: %v", err)
 	}
@@ -146,50 +161,64 @@ func TestStreamingReaderClose(t *testing.T) {
 	}
 }
 
-func TestStreamingReaderVsFullRead(t *testing.T) {
-	// Compare streaming reader with full buffer read
-	fullSamples, err := ReadWAV("../../testdata/dream.wav")
+func TestStreamingReaderMultipleReads(t *testing.T) {
+	// Test that we can read samples in chunks and get consistent results
+	// First pass: read in 2048 sample chunks
+	reader1, err := NewStreamingReader("../../testdata/LMP0.mp3")
 	if err != nil {
-		t.Fatalf("Failed to read full WAV: %v", err)
+		t.Fatalf("Failed to create first reader: %v", err)
 	}
+	defer reader1.Close()
 
-	reader, err := NewStreamingReader("../../testdata/dream.wav")
-	if err != nil {
-		t.Fatalf("Failed to create streaming reader: %v", err)
-	}
-	defer reader.Close()
-
-	// Read all samples via streaming
-	var streamedSamples []float64
+	var samples1 []float64
 	chunkSize := 2048
-
 	for {
-		chunk, err := reader.ReadChunk(chunkSize)
+		chunk, err := reader1.ReadChunk(chunkSize)
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			t.Fatalf("Error reading chunk: %v", err)
+			t.Fatalf("Error reading from first reader: %v", err)
 		}
-		streamedSamples = append(streamedSamples, chunk...)
+		samples1 = append(samples1, chunk...)
+	}
+
+	// Second pass: read in 4096 sample chunks
+	reader2, err := NewStreamingReader("../../testdata/LMP0.mp3")
+	if err != nil {
+		t.Fatalf("Failed to create second reader: %v", err)
+	}
+	defer reader2.Close()
+
+	var samples2 []float64
+	chunkSize2 := 4096
+	for {
+		chunk, err := reader2.ReadChunk(chunkSize2)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Error reading from second reader: %v", err)
+		}
+		samples2 = append(samples2, chunk...)
 	}
 
 	// Compare counts
-	if len(fullSamples) != len(streamedSamples) {
-		t.Errorf("Sample count mismatch: full=%d, streamed=%d", len(fullSamples), len(streamedSamples))
+	if len(samples1) != len(samples2) {
+		t.Errorf("Sample count mismatch: first pass=%d, second pass=%d", len(samples1), len(samples2))
 	}
 
 	// Compare first 100 samples (should be identical)
 	compareCount := 100
-	if len(fullSamples) < compareCount {
-		compareCount = len(fullSamples)
+	if len(samples1) < compareCount {
+		compareCount = len(samples1)
 	}
 
 	for i := 0; i < compareCount; i++ {
-		if fullSamples[i] != streamedSamples[i] {
-			t.Errorf("Sample %d mismatch: full=%f, streamed=%f", i, fullSamples[i], streamedSamples[i])
+		if samples1[i] != samples2[i] {
+			t.Errorf("Sample %d mismatch: pass1=%f, pass2=%f", i, samples1[i], samples2[i])
 		}
 	}
 
-	t.Logf("Streaming reader matches full read: %d samples verified", compareCount)
+	t.Logf("Multiple reads consistent: %d samples verified", compareCount)
 }

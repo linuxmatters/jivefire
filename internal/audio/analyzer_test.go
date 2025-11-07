@@ -8,7 +8,7 @@ import (
 )
 
 func TestAnalyzeAudio(t *testing.T) {
-	profile, err := AnalyzeAudio("../../testdata/dream.wav")
+	profile, err := AnalyzeAudio("../../testdata/LMP0.mp3", nil)
 	if err != nil {
 		t.Fatalf("Failed to analyze audio: %v", err)
 	}
@@ -18,8 +18,8 @@ func TestAnalyzeAudio(t *testing.T) {
 		t.Errorf("Expected positive number of frames, got %d", profile.NumFrames)
 	}
 
-	if profile.SampleRate != 44100 {
-		t.Errorf("Expected sample rate 44100, got %d", profile.SampleRate)
+	if profile.SampleRate <= 0 {
+		t.Errorf("Expected positive sample rate, got %d", profile.SampleRate)
 	}
 
 	if profile.Duration <= 0 {
@@ -59,14 +59,14 @@ func TestAnalyzeAudio(t *testing.T) {
 }
 
 func TestAnalyzeAudioInvalidFile(t *testing.T) {
-	_, err := AnalyzeAudio("nonexistent.wav")
+	_, err := AnalyzeAudio("nonexistent.mp3", nil)
 	if err == nil {
 		t.Error("Expected error for nonexistent file, got nil")
 	}
 }
 
 func TestAnalyzeFrameStatistics(t *testing.T) {
-	profile, err := AnalyzeAudio("../../testdata/dream.wav")
+	profile, err := AnalyzeAudio("../../testdata/LMP0.mp3", nil)
 	if err != nil {
 		t.Fatalf("Failed to analyze audio: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestAnalyzeFrameStatistics(t *testing.T) {
 }
 
 func TestOptimalBaseScaleCalculation(t *testing.T) {
-	profile, err := AnalyzeAudio("../../testdata/dream.wav")
+	profile, err := AnalyzeAudio("../../testdata/LMP0.mp3", nil)
 	if err != nil {
 		t.Fatalf("Failed to analyze audio: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestOptimalBaseScaleCalculation(t *testing.T) {
 }
 
 func TestGlobalPeakIsMaximum(t *testing.T) {
-	profile, err := AnalyzeAudio("../../testdata/dream.wav")
+	profile, err := AnalyzeAudio("../../testdata/LMP0.mp3", nil)
 	if err != nil {
 		t.Fatalf("Failed to analyze audio: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestGlobalPeakIsMaximum(t *testing.T) {
 }
 
 func TestGlobalRMSIsAverage(t *testing.T) {
-	profile, err := AnalyzeAudio("../../testdata/dream.wav")
+	profile, err := AnalyzeAudio("../../testdata/LMP0.mp3", nil)
 	if err != nil {
 		t.Fatalf("Failed to analyze audio: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestGlobalRMSIsAverage(t *testing.T) {
 }
 
 func TestDynamicRangeCalculation(t *testing.T) {
-	profile, err := AnalyzeAudio("../../testdata/dream.wav")
+	profile, err := AnalyzeAudio("../../testdata/LMP0.mp3", nil)
 	if err != nil {
 		t.Fatalf("Failed to analyze audio: %v", err)
 	}

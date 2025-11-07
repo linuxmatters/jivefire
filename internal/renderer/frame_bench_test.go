@@ -30,7 +30,7 @@ func BenchmarkFrameWithBackground(b *testing.B) {
 		bgImage.Pix[i+3] = 255
 	}
 
-	frame := NewFrame(bgImage, nil)
+	frame := NewFrame(bgImage, nil, 0, "")
 	barHeights := generateTestBarHeights()
 
 	b.ResetTimer()
@@ -42,7 +42,7 @@ func BenchmarkFrameWithBackground(b *testing.B) {
 // BenchmarkFrameNoBackground benchmarks frame rendering without background (black)
 func BenchmarkFrameNoBackground(b *testing.B) {
 	// Setup - no background
-	frame := NewFrame(nil, nil)
+	frame := NewFrame(nil, nil, 0, "")
 	barHeights := generateTestBarHeights()
 
 	b.ResetTimer()
@@ -56,7 +56,7 @@ func BenchmarkFrameWithText(b *testing.B) {
 	// Setup
 	bgImage := image.NewRGBA(image.Rect(0, 0, config.Width, config.Height))
 	fontFace := basicfont.Face7x13
-	frame := NewFrame(bgImage, fontFace)
+	frame := NewFrame(bgImage, fontFace, 1, "Test Episode")
 	barHeights := generateTestBarHeights()
 
 	b.ResetTimer()
@@ -80,7 +80,7 @@ func TestFrameRendering(t *testing.T) {
 	}
 
 	fontFace := basicfont.Face7x13
-	frame := NewFrame(bgImage, fontFace)
+	frame := NewFrame(bgImage, fontFace, 42, "Linux Matters")
 
 	// Test with various bar heights
 	barHeights := generateTestBarHeights()
