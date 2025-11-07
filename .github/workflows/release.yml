@@ -1,0 +1,159 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - '*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      version: ${{ steps.get_version.outputs.version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Get version from tag
+        id: get_version
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Get previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+
+          # Generate changelog between tags
+          if [ -n "$PREV_TAG" ]; then
+            echo "## Changes since $PREV_TAG" > CHANGELOG.md
+            git log $PREV_TAG..HEAD --pretty=format:"* %s (%h)" >> CHANGELOG.md
+          else
+            echo "## Initial Release" > CHANGELOG.md
+            git log --pretty=format:"* %s (%h)" >> CHANGELOG.md
+          fi
+
+          # Add release notes
+          cat >> CHANGELOG.md << 'EOF'
+
+          ## Installation
+
+          Download the appropriate binary for your platform below, make it executable, and move it to your PATH:
+
+          ```bash
+          # Linux (amd64)
+          chmod +x jivefire-linux-amd64
+          sudo mv jivefire-linux-amd64 /usr/local/bin/jivefire
+
+          # macOS (Apple Silicon)
+          chmod +x jivefire-darwin-arm64
+          sudo mv jivefire-darwin-arm64 /usr/local/bin/jivefire
+          ```
+
+          ## Checksums
+
+          SHA256 checksums are provided below for verification.
+          EOF
+
+          cat CHANGELOG.md
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.get_version.outputs.version }}
+          release_name: Jivefire ${{ steps.get_version.outputs.version }}
+          body_path: CHANGELOG.md
+          draft: false
+          prerelease: false
+
+  build-and-upload:
+    name: Build and Upload ${{ matrix.os }}-${{ matrix.arch }}
+    needs: create-release
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+            runner: ubuntu-latest
+            cc: gcc
+          - os: linux
+            arch: arm64
+            runner: ubuntu-latest
+            cc: aarch64-linux-gnu-gcc
+          - os: darwin
+            arch: amd64
+            runner: macos-latest
+            cc: cc
+          - os: darwin
+            arch: arm64
+            runner: macos-latest
+            cc: cc
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.24'
+
+      - name: Install cross-compilation tools (Linux ARM64)
+        if: matrix.os == 'linux' && matrix.arch == 'arm64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: 1
+          CC: ${{ matrix.cc }}
+        run: |
+          VERSION=${{ needs.create-release.outputs.version }}
+          echo "Building jivefire $VERSION for ${{ matrix.os }}/${{ matrix.arch }}"
+          go build -ldflags="-X main.version=$VERSION" -o jivefire-${{ matrix.os }}-${{ matrix.arch }} ./cmd/jivefire
+
+          # Create checksum
+          if [ "${{ matrix.os }}" = "darwin" ]; then
+            shasum -a 256 jivefire-${{ matrix.os }}-${{ matrix.arch }} > jivefire-${{ matrix.os }}-${{ matrix.arch }}.sha256
+          else
+            sha256sum jivefire-${{ matrix.os }}-${{ matrix.arch }} > jivefire-${{ matrix.os }}-${{ matrix.arch }}.sha256
+          fi
+
+          ls -lh jivefire-${{ matrix.os }}-${{ matrix.arch }}
+          cat jivefire-${{ matrix.os }}-${{ matrix.arch }}.sha256
+
+      - name: Upload binary
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: ./jivefire-${{ matrix.os }}-${{ matrix.arch }}
+          asset_name: jivefire-${{ matrix.os }}-${{ matrix.arch }}
+          asset_content_type: application/octet-stream
+
+      - name: Upload checksum
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: ./jivefire-${{ matrix.os }}-${{ matrix.arch }}.sha256
+          asset_name: jivefire-${{ matrix.os }}-${{ matrix.arch }}.sha256
+          asset_content_type: text/plain

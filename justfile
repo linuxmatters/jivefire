@@ -5,9 +5,12 @@
 default:
     @just --list
 
-# Build the jivefire binary
+# Build the jivefire binary (dev version)
 build:
-    CGO_ENABLED=1 go build -o jivefire ./cmd/jivefire
+    #!/usr/bin/env bash
+    VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
+    echo "Building jivefire version: $VERSION"
+    CGO_ENABLED=1 go build -ldflags="-X main.version=$VERSION" -o jivefire ./cmd/jivefire
 
 # Clean build artifacts
 clean:

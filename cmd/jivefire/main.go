@@ -18,7 +18,10 @@ import (
 	"github.com/linuxmatters/jivefire/internal/ui"
 )
 
-const version = "0.0.1"
+// version is set via ldflags at build time
+// Local dev builds: "dev"
+// Release builds: git tag (e.g. "v0.1.0")
+var version = "dev"
 
 var CLI struct {
 	Input     string `arg:"" name:"input" help:"Input WAV file" optional:""`
