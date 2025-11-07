@@ -107,6 +107,9 @@ func (f *Frame) Draw(barHeights []float64) {
 	// Draw bars with vertical symmetry optimization
 	f.drawBars(barHeights)
 
+	// Draw framing lines around center gap
+	f.drawFramingLines()
+
 	// Apply text overlay
 	if f.fontFace != nil {
 		f.applyTextOverlay()
@@ -288,6 +291,49 @@ func (f *Frame) applyTextOverlay() {
 	if f.fontFace != nil {
 		DrawCenterText(f.img, f.fontFace, f.title, f.centerY)
 		DrawEpisodeNumber(f.img, f.fontFace, f.episodeNum)
+	}
+}
+
+// drawFramingLines draws 4-pixel high horizontal lines above and below the center gap
+// using the text color (#F8B31D - brand yellow) to frame the title text
+func (f *Frame) drawFramingLines() {
+	const (
+		lineHeight = 4
+		colorR     = 248
+		colorG     = 179
+		colorB     = 29
+	)
+
+	// Calculate line positions
+	// Top line: just above where upward bars end
+	topLineY := f.centerY - config.CenterGap/2 - lineHeight
+	// Bottom line: just below where downward bars start
+	bottomLineY := f.centerY + config.CenterGap/2
+
+	// Pre-fill pixel pattern for one scanline (reused for all 4 pixels)
+	pixelPattern := make([]byte, f.totalWidth*4)
+	for px := 0; px < f.totalWidth; px++ {
+		offset := px * 4
+		pixelPattern[offset] = colorR
+		pixelPattern[offset+1] = colorG
+		pixelPattern[offset+2] = colorB
+		pixelPattern[offset+3] = 255
+	}
+
+	// Draw top framing line (4 pixels high)
+	for y := topLineY; y < topLineY+lineHeight; y++ {
+		if y >= 0 && y < config.Height {
+			offset := y*f.img.Stride + f.startX*4
+			copy(f.img.Pix[offset:offset+f.totalWidth*4], pixelPattern)
+		}
+	}
+
+	// Draw bottom framing line (4 pixels high)
+	for y := bottomLineY; y < bottomLineY+lineHeight; y++ {
+		if y >= 0 && y < config.Height {
+			offset := y*f.img.Stride + f.startX*4
+			copy(f.img.Pix[offset:offset+f.totalWidth*4], pixelPattern)
+		}
 	}
 }
 

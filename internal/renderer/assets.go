@@ -69,13 +69,16 @@ func DrawCenterText(img *image.RGBA, face font.Face, text string, centerY int) {
 		Face: face,
 	}
 
-	// Measure text width
+	// Measure text dimensions
 	bounds, _ := d.BoundString(text)
 	textWidth := (bounds.Max.X - bounds.Min.X).Ceil()
+	textHeight := (bounds.Max.Y - bounds.Min.Y).Ceil()
 
-	// Calculate centered position
+	// Calculate centered position (both horizontally and vertically)
+	// Font baseline positioning means the Y coordinate is where the baseline sits.
+	// To visually center text, we position baseline slightly below center.
 	x := (config.Width - textWidth) / 2
-	y := centerY + 10 // Slightly below center for better visual alignment
+	y := centerY + (textHeight / 3)
 
 	d.Dot = freetype.Pt(x, y)
 	d.DrawString(text)
