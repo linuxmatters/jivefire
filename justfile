@@ -7,7 +7,7 @@ default:
 
 # Build the jivefire binary
 build:
-    go build -o jivefire ./cmd/jivefire
+    CGO_ENABLED=1 go build -o jivefire ./cmd/jivefire
 
 # Clean build artifacts
 clean:
