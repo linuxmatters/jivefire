@@ -164,7 +164,7 @@ FFT bar binning logic mirrors CAVA's approach, making it familiar territory for 
 
 This a Jivefire, a Go project, that encodes podcast audio file to MP4 videos suitable for uploading to YouTube.
 
-Orientate yourself with the project by reading the documentation and code. You should refer to the ffmpeg-go source code when required, it can usually be found in `/tmp/ffmpeg-go-research`, but if it is not there you can use `gh` to clone it from https://github.com/csnewman/ffmpeg-go
+Orientate yourself with the project by reading the documentation (README.md and docs/ARCHITECTURE.md) and analysing the code. You should refer to the ffmpeg-go source code when required, it can usually be found in `/tmp/ffmpeg-go-research`, but if it is not there you can use `gh` to clone it from https://github.com/csnewman/ffmpeg-go
 
 Sample audio file is in `testdata/`. You should only build and test via `just` commands. We are using NixOS as the host operating system and `flake.nix` provides tooling for the development shell. I use the `fish` shell. If you need to create "throw-away" test code, the put it in `testdata/`.
 
