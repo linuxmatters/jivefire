@@ -1,4 +1,4 @@
-# Jivefire v0.0.1 - Just Commands
+# Jivefire - Just Commands
 # Spin your podcast .wav into a groovy MP4 visualiser
 
 # Default recipe (shows available commands)
