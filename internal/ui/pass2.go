@@ -218,8 +218,6 @@ func (m *pass2Model) renderProgress() string {
 		var leftCol strings.Builder
 		spectrum := renderSpectrum(m.lastUpdate.BarHeights, min(m.width-4, 72))
 		leftCol.WriteString(spectrum)
-		leftCol.WriteString("\n")
-		leftCol.WriteString(spectrum) // Mirror for stereo effect
 
 		var rightCol strings.Builder
 		if m.lastUpdate.FileSize > 0 || m.lastUpdate.VideoCodec != "" || m.lastUpdate.AudioCodec != "" {

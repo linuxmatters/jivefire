@@ -160,9 +160,6 @@ func (m *pass1Model) renderProgress() string {
 		s.WriteString("\n")
 		spectrum := renderSpectrum(m.lastUpdate.BarHeights, min(m.width-4, 76))
 		s.WriteString(spectrum)
-		s.WriteString("\n")
-		// Mirror for symmetry
-		s.WriteString(spectrum)
 		s.WriteString("\n\n")
 	}
 
