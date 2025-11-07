@@ -12,6 +12,13 @@ build:
     echo "Building jivefire version: $VERSION"
     CGO_ENABLED=1 go build -ldflags="-X main.version=$VERSION" -o jivefire ./cmd/jivefire
 
+# Install the jivefire binary to ~/.local/bin
+install: build
+    @mkdir -p ~/.local/bin 2>/dev/null || true
+    @mv ./jivefire ~/.local/bin/jivefire
+    @echo "Installed jivefire to ~/.local/bin/jivefire"
+    @echo "Make sure ~/.local/bin is in your PATH"
+
 # Clean build artifacts
 clean:
     rm -fv jivefire 2>/dev/null || true
