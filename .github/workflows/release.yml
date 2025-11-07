@@ -9,17 +9,45 @@ permissions:
   contents: write
 
 jobs:
-  create-release:
-    name: Create Release
+  release:
+    name: Create Release and Upload Assets
     runs-on: ubuntu-latest
-    outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
-      version: ${{ steps.get_version.outputs.version }}
+    strategy:
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+            runner: ubuntu-latest
+            cc: gcc
+          - os: linux
+            arch: arm64
+            runner: ubuntu-latest
+            cc: aarch64-linux-gnu-gcc
+          - os: darwin
+            arch: amd64
+            runner: macos-latest
+            cc: cc
+          - os: darwin
+            arch: arm64
+            runner: macos-latest
+            cc: cc
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.24'
+
+      - name: Install cross-compilation tools (Linux ARM64)
+        if: matrix.os == 'linux' && matrix.arch == 'arm64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
 
       - name: Get version from tag
         id: get_version
@@ -64,59 +92,6 @@ jobs:
 
           cat CHANGELOG.md
 
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ steps.get_version.outputs.version }}
-          release_name: Jivefire ${{ steps.get_version.outputs.version }}
-          body_path: CHANGELOG.md
-          draft: false
-          prerelease: false
-
-  build-and-upload:
-    name: Build and Upload ${{ matrix.os }}-${{ matrix.arch }}
-    needs: create-release
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      matrix:
-        include:
-          - os: linux
-            arch: amd64
-            runner: ubuntu-latest
-            cc: gcc
-          - os: linux
-            arch: arm64
-            runner: ubuntu-latest
-            cc: aarch64-linux-gnu-gcc
-          - os: darwin
-            arch: amd64
-            runner: macos-latest
-            cc: cc
-          - os: darwin
-            arch: arm64
-            runner: macos-latest
-            cc: cc
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: '1.24'
-
-      - name: Install cross-compilation tools (Linux ARM64)
-        if: matrix.os == 'linux' && matrix.arch == 'arm64'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
-
       - name: Build binary
         env:
           GOOS: ${{ matrix.os }}
@@ -124,7 +99,7 @@ jobs:
           CGO_ENABLED: 1
           CC: ${{ matrix.cc }}
         run: |
-          VERSION=${{ needs.create-release.outputs.version }}
+          VERSION=${{ steps.get_version.outputs.version }}
           echo "Building jivefire $VERSION for ${{ matrix.os }}/${{ matrix.arch }}"
           go build -ldflags="-X main.version=$VERSION" -o jivefire-${{ matrix.os }}-${{ matrix.arch }} ./cmd/jivefire
 
@@ -138,22 +113,28 @@ jobs:
           ls -lh jivefire-${{ matrix.os }}-${{ matrix.arch }}
           cat jivefire-${{ matrix.os }}-${{ matrix.arch }}.sha256
 
-      - name: Upload binary
-        uses: actions/upload-release-asset@v1
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v1
+        if: matrix.os == 'linux' && matrix.arch == 'amd64'  # Only create release once
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ./jivefire-${{ matrix.os }}-${{ matrix.arch }}
-          asset_name: jivefire-${{ matrix.os }}-${{ matrix.arch }}
-          asset_content_type: application/octet-stream
+          tag_name: ${{ steps.get_version.outputs.version }}
+          name: Jivefire ${{ steps.get_version.outputs.version }}
+          body_path: CHANGELOG.md
+          draft: false
+          prerelease: false
+          files: |
+            jivefire-*-*.*
+            *.sha256
 
-      - name: Upload checksum
-        uses: actions/upload-release-asset@v1
+      - name: Upload Assets (non-Linux builds)
+        uses: softprops/action-gh-release@v1
+        if: matrix.os != 'linux' || matrix.arch != 'amd64'  # Upload to existing release for other builds
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ./jivefire-${{ matrix.os }}-${{ matrix.arch }}.sha256
-          asset_name: jivefire-${{ matrix.os }}-${{ matrix.arch }}.sha256
-          asset_content_type: text/plain
+          tag_name: ${{ steps.get_version.outputs.version }}
+          files: |
+            jivefire-${{ matrix.os }}-${{ matrix.arch }}
+            jivefire-${{ matrix.os }}-${{ matrix.arch }}.sha256
