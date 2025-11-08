@@ -169,11 +169,28 @@ func (e *Encoder) Initialize() error {
 	// Set stream timebase
 	e.videoStream.SetTimeBase(timeBase)
 
-	// Set encoding options for quality/speed balance (CRF 23 = medium quality)
-	// Note: For now, open with nil options. We can add options via av_opt_set later if needed.
+	// Set encoding options optimized for visualization content via dictionary
+	// These are x264-specific private options that must be passed to AVCodecOpen2
+	var opts *ffmpeg.AVDictionary
+	defer ffmpeg.AVDictFree(&opts)
 
-	// Open codec
-	ret, err = ffmpeg.AVCodecOpen2(e.videoCodec, codec, nil)
+	// CRF 23 = good quality for busy visualizations
+	ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("crf"), ffmpeg.ToCStr("28"), 0)
+	// Faster preset prioritizes encoding speed
+	ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("preset"), ffmpeg.ToCStr("veryfast"), 0)
+	// Tune for animation content
+	ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("tune"), ffmpeg.ToCStr("animation"), 0)
+	// Main profile for faster encoding and broad compatibility
+	ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("profile"), ffmpeg.ToCStr("main"), 0)
+	// Single reference frame (simple vertical bar motion doesn't need multiple refs)
+	ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("ref"), ffmpeg.ToCStr("1"), 0)
+	// Reduce b-frames for faster encoding (predictable bar motion)
+	ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("bf"), ffmpeg.ToCStr("1"), 0)
+	// Simpler subpixel motion estimation (bars move in discrete pixels)
+	ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("subme"), ffmpeg.ToCStr("4"), 0)
+
+	// Open codec with options
+	ret, err = ffmpeg.AVCodecOpen2(e.videoCodec, codec, &opts)
 	if err != nil {
 		return fmt.Errorf("failed to open codec: %w", err)
 	}
@@ -896,17 +913,17 @@ func (e *Encoder) ProcessAudio() error {
 
 				// Make frame writable and write samples
 				ffmpeg.AVFrameMakeWritable(e.audioEncFrame)
-				
+
 				var writeErr error
 				if outputChannels == 2 {
 					writeErr = writeStereoFloats(e.audioEncFrame, frameSamples)
 				} else {
 					writeErr = writeMonoFloats(e.audioEncFrame, frameSamples)
 				}
-				
+
 				if writeErr != nil {
 					ffmpeg.AVPacketUnref(e.audioPacket)
-					return fmt.Errorf("failed to write %s samples: %w", 
+					return fmt.Errorf("failed to write %s samples: %w",
 						map[int]string{1: "mono", 2: "stereo"}[outputChannels], writeErr)
 				}
 
