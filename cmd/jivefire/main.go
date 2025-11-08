@@ -79,6 +79,9 @@ func main() {
 }
 
 func generateVideo(inputFile string, outputFile string, channels int, noPreview bool) {
+	// Track overall timing from the very start
+	overallStartTime := time.Now()
+
 	thumbnailPath := strings.Replace(outputFile, ".mp4", ".png", 1)
 	if err := renderer.GenerateThumbnail(thumbnailPath, CLI.Title); err != nil {
 		cli.PrintError(fmt.Sprintf("failed to generate thumbnail: %v", err))
@@ -92,6 +95,9 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 	// Run analysis in a goroutine and send progress updates
 	var profile *audio.AudioProfile
 	var analysisErr error
+	var pass1Duration time.Duration
+
+	pass1StartTime := time.Now()
 
 	go func() {
 		profile, analysisErr = audio.AnalyzeAudio(inputFile, func(frame, totalFrames int, currentRMS, currentPeak float64, barHeights []float64, duration time.Duration) {
@@ -105,6 +111,9 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 				Duration:    duration,
 			})
 		})
+
+		// Capture Pass 1 duration
+		pass1Duration = time.Since(pass1StartTime)
 
 		// Send completion message
 		if analysisErr == nil {
@@ -168,7 +177,7 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 	// Run rendering in goroutine
 	var encodingErr error
 	var perfStats struct {
-		fftTime, binTime, drawTime, writeTime, totalTime time.Duration
+		fftTime, binTime, drawTime, writeTime, audioFlushTime, totalTime time.Duration
 	}
 
 	go func() {
@@ -447,6 +456,7 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 		// Flush any remaining audio after all video frames are written
 		// Audio has been incrementally processed during the frame loop,
 		// but there may be some remaining at the end
+		audioFlushStart := time.Now()
 		audioFlushCallback := func(packetsProcessed int, elapsed time.Duration) {
 			// Send audio flush progress to UI
 			p2.Send(ui.Pass2AudioFlush{
@@ -459,6 +469,7 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 			p2.Quit()
 			return
 		}
+		audioFlushTime := time.Since(audioFlushStart)
 
 		// Finalize encoding
 		if err := enc.Close(); err != nil {
@@ -467,7 +478,7 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 			return
 		}
 
-		// Calculate total time
+		// Calculate total time (from Pass 2 render start, not including Pass 1)
 		totalTime := time.Since(renderStartTime)
 
 		// Store performance stats
@@ -475,6 +486,7 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 		perfStats.binTime = totalBin
 		perfStats.drawTime = totalDraw
 		perfStats.writeTime = totalWrite
+		perfStats.audioFlushTime = audioFlushTime
 		perfStats.totalTime = totalTime
 
 		// Get actual file size
@@ -487,6 +499,9 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 		// Calculate samples processed (sample rate * duration)
 		samplesProcessed := int64(profile.SampleRate) * int64(profile.Duration)
 
+		// Calculate overall total time from the very beginning
+		overallTotalTime := time.Since(overallStartTime)
+
 		// Send completion message
 		p2.Send(ui.Pass2Complete{
 			OutputFile:       outputFile,
@@ -497,7 +512,9 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 			BinTime:          totalBin,
 			DrawTime:         totalDraw,
 			EncodeTime:       totalWrite,
-			TotalTime:        totalTime,
+			AudioFlushTime:   audioFlushTime,
+			TotalTime:        overallTotalTime, // Use overall total, not just Pass 2
+			Pass1Time:        pass1Duration,
 			SamplesProcessed: samplesProcessed,
 		})
 	}()

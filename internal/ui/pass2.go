@@ -40,7 +40,9 @@ type Pass2Complete struct {
 	BinTime          time.Duration
 	DrawTime         time.Duration
 	EncodeTime       time.Duration
+	AudioFlushTime   time.Duration
 	TotalTime        time.Duration
+	Pass1Time        time.Duration // Time spent in Pass 1 analysis
 	SamplesProcessed int64
 }
 
@@ -355,13 +357,13 @@ func (m *pass2Model) renderComplete() string {
 	// Output summary
 	s.WriteString(fmt.Sprintf("Output:   %s\n", m.complete.OutputFile))
 
-	// Calculate speed
+	// Calculate speed using total time (not just Pass 2)
 	videoDuration := time.Duration(m.complete.TotalFrames) * time.Second / 30
-	speed := float64(videoDuration) / float64(m.complete.Duration)
+	speed := float64(videoDuration) / float64(m.complete.TotalTime)
 
 	s.WriteString(fmt.Sprintf("Duration: %.1fs video in %.1fs (%.1fx realtime)\n",
 		videoDuration.Seconds(),
-		m.complete.Duration.Seconds(),
+		m.complete.TotalTime.Seconds(),
 		speed))
 
 	s.WriteString(fmt.Sprintf("Size:     %s\n\n", formatBytes(m.complete.FileSize)))
@@ -375,27 +377,62 @@ func (m *pass2Model) renderComplete() string {
 		totalMs = 1 // Avoid division by zero
 	}
 
-	s.WriteString(fmt.Sprintf("  FFT computation:   %-5s  (%d%%)   %s\n",
+	// Pass 1 Analysis
+	if m.complete.Pass1Time > 0 {
+		s.WriteString(fmt.Sprintf("  %-19s%-5s  (%2d%%)  %s\n",
+			"Analysis:",
+			formatDuration(m.complete.Pass1Time),
+			int(float64(m.complete.Pass1Time.Milliseconds())*100/float64(totalMs)),
+			makeSparkline(float64(m.complete.Pass1Time.Milliseconds())/float64(totalMs), 30)))
+	}
+
+	// Pass 2 rendering components
+	s.WriteString(fmt.Sprintf("  %-19s%-5s  (%2d%%)  %s\n",
+		"FFT computation:",
 		formatDuration(m.complete.FFTTime),
 		int(float64(m.complete.FFTTime.Milliseconds())*100/float64(totalMs)),
 		makeSparkline(float64(m.complete.FFTTime.Milliseconds())/float64(totalMs), 30)))
 
-	s.WriteString(fmt.Sprintf("  Bar binning:       %-5s  (%d%%)   %s\n",
+	s.WriteString(fmt.Sprintf("  %-19s%-5s  (%2d%%)  %s\n",
+		"Bar binning:",
 		formatDuration(m.complete.BinTime),
 		int(float64(m.complete.BinTime.Milliseconds())*100/float64(totalMs)),
 		makeSparkline(float64(m.complete.BinTime.Milliseconds())/float64(totalMs), 30)))
 
-	s.WriteString(fmt.Sprintf("  Frame drawing:     %-5s  (%d%%)  %s\n",
+	s.WriteString(fmt.Sprintf("  %-19s%-5s  (%2d%%)  %s\n",
+		"Frame drawing:",
 		formatDuration(m.complete.DrawTime),
 		int(float64(m.complete.DrawTime.Milliseconds())*100/float64(totalMs)),
 		makeSparkline(float64(m.complete.DrawTime.Milliseconds())/float64(totalMs), 30)))
 
-	s.WriteString(fmt.Sprintf("  Video encoding:    %-5s  (%d%%)  %s\n",
+	s.WriteString(fmt.Sprintf("  %-19s%-5s  (%2d%%)  %s\n",
+		"Video encoding:",
 		formatDuration(m.complete.EncodeTime),
 		int(float64(m.complete.EncodeTime.Milliseconds())*100/float64(totalMs)),
 		makeSparkline(float64(m.complete.EncodeTime.Milliseconds())/float64(totalMs), 30)))
 
-	s.WriteString(fmt.Sprintf("  Total time:        %s\n\n", formatDuration(m.complete.TotalTime)))
+	// Audio flush
+	if m.complete.AudioFlushTime > 0 {
+		s.WriteString(fmt.Sprintf("  %-19s%-5s  (%2d%%)  %s\n",
+			"Audio encoding:",
+			formatDuration(m.complete.AudioFlushTime),
+			int(float64(m.complete.AudioFlushTime.Milliseconds())*100/float64(totalMs)),
+			makeSparkline(float64(m.complete.AudioFlushTime.Milliseconds())/float64(totalMs), 30)))
+	}
+
+	// Calculate and display "other" time (overhead, I/O, etc.)
+	accountedTime := m.complete.Pass1Time + m.complete.FFTTime + m.complete.BinTime +
+		m.complete.DrawTime + m.complete.EncodeTime + m.complete.AudioFlushTime
+	otherTime := m.complete.TotalTime - accountedTime
+	if otherTime > 0 {
+		s.WriteString(fmt.Sprintf("  %-19s%-5s  (%2d%%)  %s\n",
+			"Initialization:",
+			formatDuration(otherTime),
+			int(float64(otherTime.Milliseconds())*100/float64(totalMs)),
+			makeSparkline(float64(otherTime.Milliseconds())/float64(totalMs), 30)))
+	}
+
+	s.WriteString(fmt.Sprintf("  %-19s%s\n\n", "Total time:", formatDuration(m.complete.TotalTime)))
 
 	// Quality Metrics
 	s.WriteString(lipgloss.NewStyle().Faint(true).Render("Quality Metrics:"))
@@ -405,12 +442,9 @@ func (m *pass2Model) renderComplete() string {
 		float64(m.complete.TotalFrames)/videoDuration.Seconds()))
 
 	if m.complete.SamplesProcessed > 0 {
-		s.WriteString(fmt.Sprintf("  Audio: %d samples processed\n\n",
+		s.WriteString(fmt.Sprintf("  Audio: %d samples processed\n",
 			m.complete.SamplesProcessed))
 	}
-
-	processingTime := time.Since(m.startTime)
-	s.WriteString(fmt.Sprintf("Encoding completed in %.2fs", processingTime.Seconds()))
 
 	return lipgloss.NewStyle().
 		BorderStyle(lipgloss.RoundedBorder()).
