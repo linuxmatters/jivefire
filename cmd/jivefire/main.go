@@ -447,7 +447,14 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 		// Flush any remaining audio after all video frames are written
 		// Audio has been incrementally processed during the frame loop,
 		// but there may be some remaining at the end
-		if err := enc.FlushRemainingAudio(); err != nil {
+		audioFlushCallback := func(packetsProcessed int, elapsed time.Duration) {
+			// Send audio flush progress to UI
+			p2.Send(ui.Pass2AudioFlush{
+				PacketsProcessed: packetsProcessed,
+				Elapsed:          elapsed,
+			})
+		}
+		if err := enc.FlushRemainingAudio(audioFlushCallback); err != nil {
 			encodingErr = fmt.Errorf("error flushing audio: %w", err)
 			p2.Quit()
 			return

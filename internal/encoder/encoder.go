@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"time"
 	"unsafe"
 
 	ffmpeg "github.com/csnewman/ffmpeg-go"
@@ -844,9 +845,9 @@ func (e *Encoder) ProcessAudioUpToVideoPTS(targetVideoPts int64) error {
 	// Convert from video timebase to audio timebase
 	videoTimebaseQ := e.videoStream.TimeBase()
 	audioTimebaseQ := e.audioStream.TimeBase()
-	
+
 	targetAudioPts := ffmpeg.AVRescaleQ(targetVideoPts, videoTimebaseQ, audioTimebaseQ)
-	
+
 	// Process audio packets until we reach or exceed the target PTS
 	for e.nextAudioPts <= targetAudioPts {
 		// Read a packet from the input
@@ -981,9 +982,17 @@ func (e *Encoder) ProcessAudioUpToVideoPTS(targetVideoPts int64) error {
 	return nil
 }
 
+// AudioFlushCallback is called during audio flush with progress updates
+type AudioFlushCallback func(packetsProcessed int, elapsed time.Duration)
+
 // FlushRemainingAudio processes any remaining audio packets and flushes the audio encoder
 // Call this after all video frames have been written
-func (e *Encoder) FlushRemainingAudio() error {
+func (e *Encoder) FlushRemainingAudio(progressCallback AudioFlushCallback) error {
+	defer func() {
+	}()
+
+	flushStartTime := time.Now()
+
 	if e.audioInputCtx == nil {
 		return nil // No audio configured
 	}
@@ -995,10 +1004,15 @@ func (e *Encoder) FlushRemainingAudio() error {
 	}
 
 	// Process remaining audio packets from input file
+	audioPacketsRead := 0
+	lastProgressUpdate := time.Now()
 	for {
 		ret, err := ffmpeg.AVReadFrame(e.audioInputCtx, e.audioPacket)
 		if err != nil {
 			if errors.Is(err, ffmpeg.AVErrorEOF) {
+				if progressCallback != nil {
+					progressCallback(audioPacketsRead, time.Since(flushStartTime))
+				}
 				break // Done reading
 			}
 			return fmt.Errorf("failed to read audio frame: %w", err)
@@ -1010,6 +1024,19 @@ func (e *Encoder) FlushRemainingAudio() error {
 		if e.audioPacket.StreamIndex() != e.audioStreamIndex {
 			ffmpeg.AVPacketUnref(e.audioPacket)
 			continue
+		}
+
+		audioPacketsRead++
+		// Update progress every 20 packets or every 100ms, whichever is less frequent
+		now := time.Now()
+		if audioPacketsRead%20 == 0 && now.Sub(lastProgressUpdate) >= 100*time.Millisecond {
+			if progressCallback != nil {
+				progressCallback(audioPacketsRead, time.Since(flushStartTime))
+				lastProgressUpdate = now
+			}
+			// Log less frequently to avoid spam
+			if audioPacketsRead%100 == 0 {
+			}
 		}
 
 		ret, err = ffmpeg.AVCodecSendPacket(e.audioDecoder, e.audioPacket)
@@ -1431,6 +1458,8 @@ func (e *Encoder) ProcessAudio() error {
 
 // Close finalizes the output file and frees resources
 func (e *Encoder) Close() error {
+
+
 	// Flush encoder
 	if e.videoCodec != nil {
 		ffmpeg.AVCodecSendFrame(e.videoCodec, nil)

@@ -24,6 +24,12 @@ type Pass2Progress struct {
 	AudioCodec  string      // Audio codec info (e.g., "AAC 48kHz stereo")
 }
 
+// Pass2AudioFlush represents progress during audio flushing
+type Pass2AudioFlush struct {
+	PacketsProcessed int
+	Elapsed          time.Duration
+}
+
 // Pass2Complete signals completion of Pass 2
 type Pass2Complete struct {
 	OutputFile       string
@@ -45,6 +51,7 @@ type quitTimerMsg2 struct{}
 type pass2Model struct {
 	progress        progress.Model
 	lastUpdate      Pass2Progress
+	audioFlush      *Pass2AudioFlush // Audio flush progress
 	complete        *Pass2Complete
 	startTime       time.Time
 	completionTime  time.Time
@@ -56,6 +63,10 @@ type pass2Model struct {
 	cachedPreview   string        // Cached rendered preview string
 	cachedFrameNum  int           // Frame number of cached preview
 	noPreview       bool          // Disable video preview for better batch performance
+
+	// For unified progress tracking
+	estimatedAudioPackets int  // Estimated audio packets to process
+	inAudioPhase          bool // Whether we're in audio flush phase
 }
 
 // NewPass2Model creates a new Pass 2 UI model
@@ -92,6 +103,21 @@ func (m *pass2Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case Pass2Progress:
 		m.lastUpdate = msg
+		m.audioFlush = nil // Clear audio flush when video is progressing
+		m.inAudioPhase = false
+		// Estimate audio packets based on video frames (roughly 0.36 packets per frame)
+		m.estimatedAudioPackets = int(float64(msg.TotalFrames) * 0.36)
+		return m, nil
+
+	case Pass2AudioFlush:
+		m.audioFlush = &msg
+		if !m.inAudioPhase {
+			m.inAudioPhase = true
+			// Refine estimate if actual count is higher
+			if msg.PacketsProcessed > m.estimatedAudioPackets {
+				m.estimatedAudioPackets = int(float64(msg.PacketsProcessed) * 1.1) // Add 10% buffer
+			}
+		}
 		return m, nil
 
 	case Pass2Complete:
@@ -158,18 +184,47 @@ func (m *pass2Model) renderProgress() string {
 	s.WriteString(subtitle)
 	s.WriteString("\n\n")
 
-	// Progress bar with percentage in the center
+	// Calculate unified progress across video and audio
+	var overallPercent float64
+	var statusText string
+	var currentPhase string
+
 	if m.lastUpdate.TotalFrames > 0 {
-		percent := float64(m.lastUpdate.Frame) / float64(m.lastUpdate.TotalFrames)
+		// Total work = video frames (88%) + audio packets (12%)
+		// Based on ~53s video + ~7s audio for a typical encode
+		videoWeight := 0.88
+		audioWeight := 0.12
+
+		// Calculate video progress
+		videoPercent := float64(m.lastUpdate.Frame) / float64(m.lastUpdate.TotalFrames)
+
+		// Calculate audio progress if in audio phase
+		audioPercent := 0.0
+		if m.inAudioPhase && m.audioFlush != nil && m.estimatedAudioPackets > 0 {
+			audioPercent = float64(m.audioFlush.PacketsProcessed) / float64(m.estimatedAudioPackets)
+			if audioPercent > 1.0 {
+				audioPercent = 1.0
+			}
+			currentPhase = "Finalizing audio streams"
+		} else {
+			currentPhase = fmt.Sprintf("Frame %d of %d", m.lastUpdate.Frame, m.lastUpdate.TotalFrames)
+		}
+
+		// Calculate overall progress
+		if m.inAudioPhase {
+			// Video is complete (90%) + audio progress (0-10%)
+			overallPercent = videoWeight + (audioPercent * audioWeight)
+			statusText = fmt.Sprintf("%d%%",
+				int(overallPercent*100))
+		} else {
+			// Just video progress (0-90%)
+			overallPercent = videoPercent * videoWeight
+			statusText = fmt.Sprintf("%d%%",
+				int(overallPercent*100))
+		}
 
 		// Render progress bar
-		progressBar := m.progress.ViewAs(percent)
-
-		// Show progress status
-		statusText := fmt.Sprintf("%d%% (%d/%d)",
-			int(percent*100),
-			m.lastUpdate.Frame,
-			m.lastUpdate.TotalFrames)
+		progressBar := m.progress.ViewAs(overallPercent)
 
 		s.WriteString("Progress: ")
 		s.WriteString(progressBar)
@@ -183,13 +238,18 @@ func (m *pass2Model) renderProgress() string {
 			elapsed = time.Since(m.startTime)
 		}
 
+		// If in audio phase, use the audio flush elapsed time
+		if m.inAudioPhase && m.audioFlush != nil && m.audioFlush.Elapsed > 0 {
+			elapsed = m.audioFlush.Elapsed
+		}
+
 		// Calculate estimated total time and ETA
 		var estimatedTotal time.Duration
 		var eta time.Duration
 		var speed float64
 
-		if m.lastUpdate.Frame > 0 && percent > 0 {
-			estimatedTotal = time.Duration(float64(elapsed) / percent)
+		if overallPercent > 0 {
+			estimatedTotal = time.Duration(float64(elapsed) / overallPercent)
 			eta = estimatedTotal - elapsed
 
 			// Calculate speed as ratio of video duration to encoding time
@@ -207,6 +267,11 @@ func (m *pass2Model) renderProgress() string {
 			formatDuration(eta))
 
 		s.WriteString(lipgloss.NewStyle().Faint(true).Render(timingInfo))
+		s.WriteString("\n")
+
+		// Show current phase
+		phaseStyle := lipgloss.NewStyle().Faint(true).Italic(true)
+		s.WriteString(phaseStyle.Render(currentPhase))
 		s.WriteString("\n\n")
 	}
 
