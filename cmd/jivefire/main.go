@@ -371,18 +371,18 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 				barHeightsCopy := make([]float64, len(rearrangedHeights))
 				copy(barHeightsCopy, rearrangedHeights)
 
-				// Estimate file size (rough calculation: bitrate * duration)
-				// Assuming ~4 Mbps video + ~192 kbps audio
-				videoDuration := time.Duration(numFrames) * time.Second / time.Duration(config.FPS)
-				estimatedBitrate := 4.0 * 1024 * 1024 / 8 // 4 Mbps in bytes/sec
-				estimatedSize := int64(float64(estimatedBitrate) * videoDuration.Seconds() * float64(frameNum) / float64(numFrames))
+				// Get actual file size from disk (not an estimate)
+				var currentFileSize int64
+				if fileInfo, err := os.Stat(outputFile); err == nil {
+					currentFileSize = fileInfo.Size()
+				}
 
 				p2.Send(ui.Pass2Progress{
 					Frame:       frameNum + 1,
 					TotalFrames: numFrames,
 					Elapsed:     elapsed,
 					BarHeights:  barHeightsCopy,
-					FileSize:    estimatedSize,
+					FileSize:    currentFileSize,
 					Sensitivity: sensitivity,
 					FrameData:   frameData, // Send frame every 6 frames for preview
 					VideoCodec:  fmt.Sprintf("H.264 %d×%d", config.Width, config.Height),
@@ -436,6 +436,9 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 		}
 
 		// Process audio through the encoder
+		// Notify UI that we're processing audio (explains 99% -> 100% delay)
+		p2.Send(ui.Pass2AudioProcessing{})
+
 		if err := enc.ProcessAudio(); err != nil {
 			encodingErr = fmt.Errorf("error processing audio: %w", err)
 			p2.Quit()

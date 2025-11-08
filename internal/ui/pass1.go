@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/progress"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -35,7 +34,6 @@ type quitTimerMsg struct{}
 
 // pass1Model implements the Bubbletea model for Pass 1
 type pass1Model struct {
-	progress        progress.Model
 	lastUpdate      Pass1Progress
 	complete        *Pass1Complete
 	startTime       time.Time
@@ -49,13 +47,7 @@ type pass1Model struct {
 
 // NewPass1Model creates a new Pass 1 UI model
 func NewPass1Model() tea.Model {
-	p := progress.New(
-		progress.WithDefaultGradient(),
-		progress.WithWidth(60),
-	)
-
 	return &pass1Model{
-		progress:        p,
 		startTime:       time.Now(),
 		minDisplayTime:  500 * time.Millisecond,
 		completionDelay: 250 * time.Millisecond,
@@ -74,7 +66,6 @@ func (m *pass1Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.progress.Width = min(msg.Width-20, 80)
 		return m, nil
 
 	case Pass1Progress:
@@ -141,17 +132,19 @@ func (m *pass1Model) renderProgress() string {
 	s.WriteString(lipgloss.NewStyle().Faint(true).Render("Pass 1: Analyzing Audio"))
 	s.WriteString("\n\n")
 
-	// Progress bar
-	if m.lastUpdate.TotalFrames > 0 {
-		percent := float64(m.lastUpdate.Frame) / float64(m.lastUpdate.TotalFrames)
-		s.WriteString(m.progress.ViewAs(percent))
-		s.WriteString(fmt.Sprintf(" %d%% (%d/%d)\n\n",
-			int(percent*100),
+	// Show elapsed time and frame count (no progress bar since we don't know total)
+	if m.lastUpdate.Frame > 0 {
+		elapsed := m.lastUpdate.Duration
+		if elapsed == 0 {
+			elapsed = time.Since(m.startTime)
+		}
+		
+		s.WriteString(lipgloss.NewStyle().Faint(true).Render("Analyzing..."))
+		s.WriteString(fmt.Sprintf("  %d frames  │  Elapsed: %s\n\n",
 			m.lastUpdate.Frame,
-			m.lastUpdate.TotalFrames))
+			formatDuration(elapsed)))
 	} else {
-		s.WriteString(m.progress.ViewAs(0))
-		s.WriteString(" 0% (0/0)\n\n")
+		s.WriteString(lipgloss.NewStyle().Faint(true).Render("Starting analysis...\n\n"))
 	}
 
 	// Live Spectrum Preview
@@ -165,34 +158,33 @@ func (m *pass1Model) renderProgress() string {
 
 	// Audio Stats
 	if m.lastUpdate.Frame > 0 {
-		statsStyle := lipgloss.NewStyle().Faint(true)
+		s.WriteString(lipgloss.NewStyle().Faint(true).Render("Audio Stats:"))
+		s.WriteString("\n")
 
 		duration := m.lastUpdate.Duration.Seconds()
 		sampleRate := 44.1 // kHz - could be made dynamic
+		peakDB := 20 * math.Log10(m.lastUpdate.CurrentPeak)
+		rmsDB := 20 * math.Log10(m.lastUpdate.CurrentRMS)
+		
+		// Create styled stats display with fixed-width formatting to prevent shimmer
+		labelStyle := lipgloss.NewStyle().Faint(true)
+		valueStyle := lipgloss.NewStyle()
 
-		s.WriteString(statsStyle.Render("Audio Stats:"))
+		s.WriteString("  ")
+		s.WriteString(labelStyle.Render("Duration:    "))
+		s.WriteString(valueStyle.Render(fmt.Sprintf("%6.1fs", duration)))
+		s.WriteString("  │  ")
+		s.WriteString(labelStyle.Render("Sample Rate: "))
+		s.WriteString(valueStyle.Render(fmt.Sprintf("%6.1f kHz", sampleRate)))
 		s.WriteString("\n")
 
-		leftCol := fmt.Sprintf("  Duration:       %.1fs", duration)
-		rightCol := fmt.Sprintf("Sample Rate:  %.1f kHz", sampleRate)
-		s.WriteString(leftCol + "  │  " + rightCol + "\n")
-
-		leftCol = fmt.Sprintf("  Peak Level:     %.1f dB", 20*math.Log10(m.lastUpdate.CurrentPeak))
-		rightCol = fmt.Sprintf("RMS Level:    %.1f dB", 20*math.Log10(m.lastUpdate.CurrentRMS))
-		s.WriteString(leftCol + "  │  " + rightCol + "\n")
-
-		s.WriteString("\n")
-	}
-
-	// Estimated time remaining
-	if m.lastUpdate.Frame > 0 && m.lastUpdate.TotalFrames > 0 {
-		elapsed := time.Since(m.startTime)
-		framesPerSec := float64(m.lastUpdate.Frame) / elapsed.Seconds()
-		remaining := float64(m.lastUpdate.TotalFrames-m.lastUpdate.Frame) / framesPerSec
-
-		s.WriteString(lipgloss.NewStyle().Faint(true).Render(
-			fmt.Sprintf("Estimated Time Remaining: %.1fs", remaining)))
-		s.WriteString("\n")
+		s.WriteString("  ")
+		s.WriteString(labelStyle.Render("Peak Level:  "))
+		s.WriteString(valueStyle.Render(fmt.Sprintf("%6.1f dB", peakDB)))
+		s.WriteString("  │  ")
+		s.WriteString(labelStyle.Render("RMS Level:   "))
+		s.WriteString(valueStyle.Render(fmt.Sprintf("%6.1f dB", rmsDB)))
+		s.WriteString("\n\n")
 	}
 
 	return lipgloss.NewStyle().

@@ -75,4 +75,4 @@ test:
 
 # Get project orientation info
 onboard:
-  tail -n 9 docs/ARCHITECTURE.md
+  @tail -n 9 docs/ARCHITECTURE.md
