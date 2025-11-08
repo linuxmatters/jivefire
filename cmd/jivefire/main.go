@@ -356,6 +356,15 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 			}
 			totalWrite += time.Since(t0)
 
+			// Process audio up to this video frame's timestamp (interleaved encoding)
+			// This eliminates the 99% stall by muxing audio alongside video
+			videoPTS := int64(frameNum)
+			if err := enc.ProcessAudioUpToVideoPTS(videoPTS); err != nil {
+				encodingErr = fmt.Errorf("error processing audio at frame %d: %w", frameNum, err)
+				p2.Quit()
+				return
+			}
+
 			// Send progress update every 3 frames
 			// Send frame data for preview every 6 frames (5Hz at 30fps - good balance)
 			// Skip frame data entirely if preview is disabled for better batch performance
@@ -435,12 +444,11 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 			}
 		}
 
-		// Process audio through the encoder
-		// Notify UI that we're processing audio (explains 99% -> 100% delay)
-		p2.Send(ui.Pass2AudioProcessing{})
-
-		if err := enc.ProcessAudio(); err != nil {
-			encodingErr = fmt.Errorf("error processing audio: %w", err)
+		// Flush any remaining audio after all video frames are written
+		// Audio has been incrementally processed during the frame loop,
+		// but there may be some remaining at the end
+		if err := enc.FlushRemainingAudio(); err != nil {
+			encodingErr = fmt.Errorf("error flushing audio: %w", err)
 			p2.Quit()
 			return
 		}

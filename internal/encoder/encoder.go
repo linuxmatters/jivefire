@@ -831,6 +831,366 @@ func writeStereoFloats(frame *ffmpeg.AVFrame, samples []float32) error {
 	return nil
 }
 
+// ProcessAudioUpToVideoPTS processes audio packets up to (and slightly beyond) the given video PTS
+// This allows audio and video to be interleaved during encoding
+func (e *Encoder) ProcessAudioUpToVideoPTS(targetVideoPts int64) error {
+	if e.audioInputCtx == nil {
+		return nil // No audio configured
+	}
+
+	encoderFrameSize := e.audioCodec.FrameSize() // Should be 1024 for AAC
+
+	// Calculate target audio PTS based on video PTS
+	// Convert from video timebase to audio timebase
+	videoTimebaseQ := e.videoStream.TimeBase()
+	audioTimebaseQ := e.audioStream.TimeBase()
+	
+	targetAudioPts := ffmpeg.AVRescaleQ(targetVideoPts, videoTimebaseQ, audioTimebaseQ)
+	
+	// Process audio packets until we reach or exceed the target PTS
+	for e.nextAudioPts <= targetAudioPts {
+		// Read a packet from the input
+		ret, err := ffmpeg.AVReadFrame(e.audioInputCtx, e.audioPacket)
+		if err != nil {
+			if errors.Is(err, ffmpeg.AVErrorEOF) {
+				// End of audio file - we're done for now
+				return nil
+			}
+			return fmt.Errorf("failed to read audio frame: %w", err)
+		}
+		if ret < 0 {
+			return fmt.Errorf("failed to read audio frame: %d", ret)
+		}
+
+		// Only process audio packets
+		if e.audioPacket.StreamIndex() != e.audioStreamIndex {
+			ffmpeg.AVPacketUnref(e.audioPacket)
+			continue
+		}
+
+		// Send packet to decoder
+		ret, err = ffmpeg.AVCodecSendPacket(e.audioDecoder, e.audioPacket)
+		if err != nil {
+			ffmpeg.AVPacketUnref(e.audioPacket)
+			return fmt.Errorf("failed to send audio packet to decoder: %w", err)
+		}
+
+		// Receive decoded frames
+		for {
+			ret, err = ffmpeg.AVCodecReceiveFrame(e.audioDecoder, e.audioDecFrame)
+			if err != nil {
+				if errors.Is(err, ffmpeg.AVErrorEOF) || errors.Is(err, ffmpeg.EAgain) {
+					break
+				}
+				ffmpeg.AVPacketUnref(e.audioPacket)
+				return fmt.Errorf("failed to receive audio frame from decoder: %w", err)
+			}
+
+			// Extract float samples from decoded frame (with downmix if stereo)
+			channels := e.audioDecoder.Channels()
+			monoSamples, err := extractFloatsWithDownmix(e.audioDecFrame, channels)
+			if err != nil {
+				ffmpeg.AVPacketUnref(e.audioPacket)
+				return fmt.Errorf("failed to extract samples: %w", err)
+			}
+
+			// Determine output channels
+			outputChannels := e.config.AudioChannels
+			if outputChannels == 0 {
+				outputChannels = 1 // Default to mono
+			}
+
+			// Convert to output format
+			var outputSamples []float32
+			if outputChannels == 2 {
+				// Convert mono to stereo
+				outputSamples = monoToStereo(monoSamples)
+			} else {
+				// Keep as mono
+				outputSamples = monoSamples
+			}
+
+			// Push to FIFO
+			e.audioFIFO.Push(outputSamples)
+
+			// Process all complete frames in FIFO
+			samplesPerFrame := encoderFrameSize * outputChannels
+			for e.audioFIFO.Available() >= samplesPerFrame {
+				// Pop exactly one encoder frame worth of samples
+				frameSamples := e.audioFIFO.Pop(samplesPerFrame)
+
+				// Make frame writable and write samples
+				ffmpeg.AVFrameMakeWritable(e.audioEncFrame)
+
+				var writeErr error
+				if outputChannels == 2 {
+					writeErr = writeStereoFloats(e.audioEncFrame, frameSamples)
+				} else {
+					writeErr = writeMonoFloats(e.audioEncFrame, frameSamples)
+				}
+
+				if writeErr != nil {
+					ffmpeg.AVPacketUnref(e.audioPacket)
+					return fmt.Errorf("failed to write %s samples: %w",
+						map[int]string{1: "mono", 2: "stereo"}[outputChannels], writeErr)
+				}
+
+				// Set PTS
+				e.audioEncFrame.SetPts(e.nextAudioPts)
+				e.nextAudioPts += int64(encoderFrameSize)
+
+				// Send to encoder
+				ret, err = ffmpeg.AVCodecSendFrame(e.audioCodec, e.audioEncFrame)
+				if err != nil {
+					ffmpeg.AVPacketUnref(e.audioPacket)
+					return fmt.Errorf("failed to send audio frame to encoder: %w", err)
+				}
+
+				// Receive encoded packets
+				for {
+					encodedPkt := ffmpeg.AVPacketAlloc()
+					ret, err = ffmpeg.AVCodecReceivePacket(e.audioCodec, encodedPkt)
+					if err != nil || errors.Is(err, ffmpeg.EAgain) || errors.Is(err, ffmpeg.AVErrorEOF) {
+						ffmpeg.AVPacketFree(&encodedPkt)
+						break
+					}
+					if ret < 0 {
+						ffmpeg.AVPacketFree(&encodedPkt)
+						ffmpeg.AVPacketUnref(e.audioPacket)
+						return fmt.Errorf("failed to receive audio packet from encoder: %d", ret)
+					}
+
+					// Set stream index and timestamps
+					encodedPkt.SetStreamIndex(e.audioStream.Index())
+					ffmpeg.AVPacketRescaleTs(encodedPkt, e.audioCodec.TimeBase(), e.audioStream.TimeBase())
+
+					// Write packet to output
+					ret, err = ffmpeg.AVInterleavedWriteFrame(e.formatCtx, encodedPkt)
+					ffmpeg.AVPacketFree(&encodedPkt)
+					if err != nil {
+						ffmpeg.AVPacketUnref(e.audioPacket)
+						return fmt.Errorf("failed to write audio packet: %w", err)
+					}
+				}
+			}
+		}
+
+		ffmpeg.AVPacketUnref(e.audioPacket)
+	}
+
+	return nil
+}
+
+// FlushRemainingAudio processes any remaining audio packets and flushes the audio encoder
+// Call this after all video frames have been written
+func (e *Encoder) FlushRemainingAudio() error {
+	if e.audioInputCtx == nil {
+		return nil // No audio configured
+	}
+
+	encoderFrameSize := e.audioCodec.FrameSize()
+	outputChannels := e.config.AudioChannels
+	if outputChannels == 0 {
+		outputChannels = 1
+	}
+
+	// Process remaining audio packets from input file
+	for {
+		ret, err := ffmpeg.AVReadFrame(e.audioInputCtx, e.audioPacket)
+		if err != nil {
+			if errors.Is(err, ffmpeg.AVErrorEOF) {
+				break // Done reading
+			}
+			return fmt.Errorf("failed to read audio frame: %w", err)
+		}
+		if ret < 0 {
+			return fmt.Errorf("failed to read audio frame: %d", ret)
+		}
+
+		if e.audioPacket.StreamIndex() != e.audioStreamIndex {
+			ffmpeg.AVPacketUnref(e.audioPacket)
+			continue
+		}
+
+		ret, err = ffmpeg.AVCodecSendPacket(e.audioDecoder, e.audioPacket)
+		if err != nil {
+			ffmpeg.AVPacketUnref(e.audioPacket)
+			return fmt.Errorf("failed to send audio packet to decoder: %w", err)
+		}
+
+		for {
+			ret, err = ffmpeg.AVCodecReceiveFrame(e.audioDecoder, e.audioDecFrame)
+			if err != nil {
+				if errors.Is(err, ffmpeg.AVErrorEOF) || errors.Is(err, ffmpeg.EAgain) {
+					break
+				}
+				ffmpeg.AVPacketUnref(e.audioPacket)
+				return fmt.Errorf("failed to receive audio frame from decoder: %w", err)
+			}
+
+			channels := e.audioDecoder.Channels()
+			monoSamples, err := extractFloatsWithDownmix(e.audioDecFrame, channels)
+			if err != nil {
+				ffmpeg.AVPacketUnref(e.audioPacket)
+				return fmt.Errorf("failed to extract samples: %w", err)
+			}
+
+			var outputSamples []float32
+			if outputChannels == 2 {
+				outputSamples = monoToStereo(monoSamples)
+			} else {
+				outputSamples = monoSamples
+			}
+
+			e.audioFIFO.Push(outputSamples)
+
+			samplesPerFrame := encoderFrameSize * outputChannels
+			for e.audioFIFO.Available() >= samplesPerFrame {
+				frameSamples := e.audioFIFO.Pop(samplesPerFrame)
+				ffmpeg.AVFrameMakeWritable(e.audioEncFrame)
+
+				var writeErr error
+				if outputChannels == 2 {
+					writeErr = writeStereoFloats(e.audioEncFrame, frameSamples)
+				} else {
+					writeErr = writeMonoFloats(e.audioEncFrame, frameSamples)
+				}
+
+				if writeErr != nil {
+					ffmpeg.AVPacketUnref(e.audioPacket)
+					return fmt.Errorf("failed to write samples: %w", writeErr)
+				}
+
+				e.audioEncFrame.SetPts(e.nextAudioPts)
+				e.nextAudioPts += int64(encoderFrameSize)
+
+				ret, err = ffmpeg.AVCodecSendFrame(e.audioCodec, e.audioEncFrame)
+				if err != nil {
+					ffmpeg.AVPacketUnref(e.audioPacket)
+					return fmt.Errorf("failed to send audio frame to encoder: %w", err)
+				}
+
+				for {
+					encodedPkt := ffmpeg.AVPacketAlloc()
+					ret, err = ffmpeg.AVCodecReceivePacket(e.audioCodec, encodedPkt)
+					if err != nil || errors.Is(err, ffmpeg.EAgain) || errors.Is(err, ffmpeg.AVErrorEOF) {
+						ffmpeg.AVPacketFree(&encodedPkt)
+						break
+					}
+
+					encodedPkt.SetStreamIndex(e.audioStream.Index())
+					ffmpeg.AVPacketRescaleTs(encodedPkt, e.audioCodec.TimeBase(), e.audioStream.TimeBase())
+					ffmpeg.AVInterleavedWriteFrame(e.formatCtx, encodedPkt)
+					ffmpeg.AVPacketFree(&encodedPkt)
+				}
+			}
+		}
+
+		ffmpeg.AVPacketUnref(e.audioPacket)
+	}
+
+	// Flush audio decoder
+	ffmpeg.AVCodecSendPacket(e.audioDecoder, nil)
+	for {
+		_, err := ffmpeg.AVCodecReceiveFrame(e.audioDecoder, e.audioDecFrame)
+		if err != nil || errors.Is(err, ffmpeg.AVErrorEOF) {
+			break
+		}
+
+		channels := e.audioDecoder.Channels()
+		monoSamples, _ := extractFloatsWithDownmix(e.audioDecFrame, channels)
+		var outputSamples []float32
+		if outputChannels == 2 {
+			outputSamples = monoToStereo(monoSamples)
+		} else {
+			outputSamples = monoSamples
+		}
+		e.audioFIFO.Push(outputSamples)
+
+		samplesPerFrame := encoderFrameSize * outputChannels
+		for e.audioFIFO.Available() >= samplesPerFrame {
+			frameSamples := e.audioFIFO.Pop(samplesPerFrame)
+			ffmpeg.AVFrameMakeWritable(e.audioEncFrame)
+
+			if outputChannels == 2 {
+				writeStereoFloats(e.audioEncFrame, frameSamples)
+			} else {
+				writeMonoFloats(e.audioEncFrame, frameSamples)
+			}
+
+			e.audioEncFrame.SetPts(e.nextAudioPts)
+			e.nextAudioPts += int64(encoderFrameSize)
+			ffmpeg.AVCodecSendFrame(e.audioCodec, e.audioEncFrame)
+
+			for {
+				encodedPkt := ffmpeg.AVPacketAlloc()
+				_, err := ffmpeg.AVCodecReceivePacket(e.audioCodec, encodedPkt)
+				if err != nil || errors.Is(err, ffmpeg.AVErrorEOF) {
+					ffmpeg.AVPacketFree(&encodedPkt)
+					break
+				}
+
+				encodedPkt.SetStreamIndex(e.audioStream.Index())
+				ffmpeg.AVPacketRescaleTs(encodedPkt, e.audioCodec.TimeBase(), e.audioStream.TimeBase())
+				ffmpeg.AVInterleavedWriteFrame(e.formatCtx, encodedPkt)
+				ffmpeg.AVPacketFree(&encodedPkt)
+			}
+		}
+	}
+
+	// Handle remaining samples in FIFO (pad with silence if needed)
+	if e.audioFIFO.Available() > 0 {
+		remaining := e.audioFIFO.Available()
+		needed := encoderFrameSize * outputChannels
+
+		partialSamples := e.audioFIFO.Pop(remaining)
+		paddedSamples := make([]float32, needed)
+		copy(paddedSamples, partialSamples)
+
+		ffmpeg.AVFrameMakeWritable(e.audioEncFrame)
+		if outputChannels == 2 {
+			writeStereoFloats(e.audioEncFrame, paddedSamples)
+		} else {
+			writeMonoFloats(e.audioEncFrame, paddedSamples)
+		}
+
+		e.audioEncFrame.SetPts(e.nextAudioPts)
+		ffmpeg.AVCodecSendFrame(e.audioCodec, e.audioEncFrame)
+
+		for {
+			encodedPkt := ffmpeg.AVPacketAlloc()
+			_, err := ffmpeg.AVCodecReceivePacket(e.audioCodec, encodedPkt)
+			if err != nil || errors.Is(err, ffmpeg.AVErrorEOF) {
+				ffmpeg.AVPacketFree(&encodedPkt)
+				break
+			}
+
+			encodedPkt.SetStreamIndex(e.audioStream.Index())
+			ffmpeg.AVPacketRescaleTs(encodedPkt, e.audioCodec.TimeBase(), e.audioStream.TimeBase())
+			ffmpeg.AVInterleavedWriteFrame(e.formatCtx, encodedPkt)
+			ffmpeg.AVPacketFree(&encodedPkt)
+		}
+	}
+
+	// Final flush of audio encoder
+	ffmpeg.AVCodecSendFrame(e.audioCodec, nil)
+	for {
+		encodedPkt := ffmpeg.AVPacketAlloc()
+		_, err := ffmpeg.AVCodecReceivePacket(e.audioCodec, encodedPkt)
+		if err != nil || errors.Is(err, ffmpeg.AVErrorEOF) {
+			ffmpeg.AVPacketFree(&encodedPkt)
+			break
+		}
+
+		encodedPkt.SetStreamIndex(e.audioStream.Index())
+		ffmpeg.AVPacketRescaleTs(encodedPkt, e.audioCodec.TimeBase(), e.audioStream.TimeBase())
+		ffmpeg.AVInterleavedWriteFrame(e.formatCtx, encodedPkt)
+		ffmpeg.AVPacketFree(&encodedPkt)
+	}
+
+	return nil
+}
+
 // ProcessAudio reads and processes all audio from the input file
 func (e *Encoder) ProcessAudio() error {
 	if e.audioInputCtx == nil {

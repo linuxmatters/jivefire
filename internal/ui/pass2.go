@@ -24,9 +24,6 @@ type Pass2Progress struct {
 	AudioCodec  string      // Audio codec info (e.g., "AAC 48kHz stereo")
 }
 
-// Pass2AudioProcessing signals that audio processing has started
-type Pass2AudioProcessing struct{}
-
 // Pass2Complete signals completion of Pass 2
 type Pass2Complete struct {
 	OutputFile       string
@@ -49,7 +46,6 @@ type pass2Model struct {
 	progress        progress.Model
 	lastUpdate      Pass2Progress
 	complete        *Pass2Complete
-	processingAudio bool // Flag to indicate audio processing phase
 	startTime       time.Time
 	completionTime  time.Time
 	width           int
@@ -96,10 +92,6 @@ func (m *pass2Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case Pass2Progress:
 		m.lastUpdate = msg
-		return m, nil
-
-	case Pass2AudioProcessing:
-		m.processingAudio = true
 		return m, nil
 
 	case Pass2Complete:
@@ -173,18 +165,11 @@ func (m *pass2Model) renderProgress() string {
 		// Render progress bar
 		progressBar := m.progress.ViewAs(percent)
 
-		// Show different status depending on phase
-		var statusText string
-		if m.processingAudio {
-			statusText = fmt.Sprintf("100%% (%d/%d) - Processing audio...",
-				m.lastUpdate.TotalFrames,
-				m.lastUpdate.TotalFrames)
-		} else {
-			statusText = fmt.Sprintf("%d%% (%d/%d)",
-				int(percent*100),
-				m.lastUpdate.Frame,
-				m.lastUpdate.TotalFrames)
-		}
+		// Show progress status
+		statusText := fmt.Sprintf("%d%% (%d/%d)",
+			int(percent*100),
+			m.lastUpdate.Frame,
+			m.lastUpdate.TotalFrames)
 
 		s.WriteString("Progress: ")
 		s.WriteString(progressBar)
