@@ -23,10 +23,11 @@ type Frame struct {
 	title      string
 
 	// Pre-computed values
-	maxBarHeight  int
-	alphaTable    []uint8    // Pre-computed alpha values for gradient
-	barColorTable [][3]uint8 // Pre-computed bar colors at different alpha levels
-	hasBackground bool
+	maxBarHeight    int
+	alphaTable      []uint8    // Pre-computed alpha values for gradient
+	barColorTable   [][3]uint8 // Pre-computed bar colors at different alpha levels
+	framingLineData []byte     // Pre-rendered framing line pixel pattern
+	hasBackground   bool
 }
 
 var framePool = sync.Pool{
@@ -61,6 +62,16 @@ func NewFrame(bgImage *image.RGBA, fontFace font.Face, episodeNum int, title str
 		barColorTable[alpha][2] = uint8(float64(config.BarColorB) * factor)
 	}
 
+	// Pre-render framing line pattern (yellow brand color)
+	framingLineData := make([]byte, totalWidth*4)
+	for px := 0; px < totalWidth; px++ {
+		offset := px * 4
+		framingLineData[offset] = 248   // R
+		framingLineData[offset+1] = 179 // G
+		framingLineData[offset+2] = 29  // B
+		framingLineData[offset+3] = 255 // A
+	}
+
 	// Format episode number as two-digit string
 	episodeStr := "00"
 	if episodeNum > 0 {
@@ -68,18 +79,19 @@ func NewFrame(bgImage *image.RGBA, fontFace font.Face, episodeNum int, title str
 	}
 
 	f := &Frame{
-		img:           framePool.Get().(*image.RGBA),
-		bgImage:       bgImage,
-		fontFace:      fontFace,
-		centerY:       centerY,
-		startX:        startX,
-		totalWidth:    totalWidth,
-		episodeNum:    episodeStr,
-		title:         title,
-		maxBarHeight:  maxBarHeight,
-		alphaTable:    alphaTable,
-		barColorTable: barColorTable,
-		hasBackground: bgImage != nil,
+		img:             framePool.Get().(*image.RGBA),
+		bgImage:         bgImage,
+		fontFace:        fontFace,
+		centerY:         centerY,
+		startX:          startX,
+		totalWidth:      totalWidth,
+		episodeNum:      episodeStr,
+		title:           title,
+		maxBarHeight:    maxBarHeight,
+		alphaTable:      alphaTable,
+		barColorTable:   barColorTable,
+		framingLineData: framingLineData,
+		hasBackground:   bgImage != nil,
 	}
 
 	return f
@@ -297,12 +309,7 @@ func (f *Frame) applyTextOverlay() {
 // drawFramingLines draws 4-pixel high horizontal lines above and below the center gap
 // using the text color (#F8B31D - brand yellow) to frame the title text
 func (f *Frame) drawFramingLines() {
-	const (
-		lineHeight = 4
-		colorR     = 248
-		colorG     = 179
-		colorB     = 29
-	)
+	const lineHeight = 4
 
 	// Calculate line positions
 	// Top line: just above where upward bars end
@@ -310,29 +317,19 @@ func (f *Frame) drawFramingLines() {
 	// Bottom line: just below where downward bars start
 	bottomLineY := f.centerY + config.CenterGap/2
 
-	// Pre-fill pixel pattern for one scanline (reused for all 4 pixels)
-	pixelPattern := make([]byte, f.totalWidth*4)
-	for px := 0; px < f.totalWidth; px++ {
-		offset := px * 4
-		pixelPattern[offset] = colorR
-		pixelPattern[offset+1] = colorG
-		pixelPattern[offset+2] = colorB
-		pixelPattern[offset+3] = 255
-	}
-
-	// Draw top framing line (4 pixels high)
+	// Draw top framing line (4 pixels high) - reuse pre-rendered pattern
 	for y := topLineY; y < topLineY+lineHeight; y++ {
 		if y >= 0 && y < config.Height {
 			offset := y*f.img.Stride + f.startX*4
-			copy(f.img.Pix[offset:offset+f.totalWidth*4], pixelPattern)
+			copy(f.img.Pix[offset:offset+f.totalWidth*4], f.framingLineData)
 		}
 	}
 
-	// Draw bottom framing line (4 pixels high)
+	// Draw bottom framing line (4 pixels high) - reuse pre-rendered pattern
 	for y := bottomLineY; y < bottomLineY+lineHeight; y++ {
 		if y >= 0 && y < config.Height {
 			offset := y*f.img.Stride + f.startX*4
-			copy(f.img.Pix[offset:offset+f.totalWidth*4], pixelPattern)
+			copy(f.img.Pix[offset:offset+f.totalWidth*4], f.framingLineData)
 		}
 	}
 }
