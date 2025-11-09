@@ -379,7 +379,7 @@ func (m *pass2Model) renderComplete() string {
 
 	// Pass 1 Analysis
 	if m.complete.Pass1Time > 0 {
-		s.WriteString(fmt.Sprintf("  %-19s%-5s  (%2d%%)  %s\n",
+		s.WriteString(fmt.Sprintf("  %-20s%-5s  (%2d%%)  %s\n",
 			"Analysis:",
 			formatDuration(m.complete.Pass1Time),
 			int(float64(m.complete.Pass1Time.Milliseconds())*100/float64(totalMs)),
@@ -387,34 +387,34 @@ func (m *pass2Model) renderComplete() string {
 	}
 
 	// Pass 2 rendering components
-	s.WriteString(fmt.Sprintf("  %-19s%-5s  (%2d%%)  %s\n",
+	s.WriteString(fmt.Sprintf("  %-20s%-5s  (%2d%%)  %s\n",
 		"FFT computation:",
 		formatDuration(m.complete.FFTTime),
 		int(float64(m.complete.FFTTime.Milliseconds())*100/float64(totalMs)),
 		makeSparkline(float64(m.complete.FFTTime.Milliseconds())/float64(totalMs), 30)))
 
-	s.WriteString(fmt.Sprintf("  %-19s%-5s  (%2d%%)  %s\n",
+	s.WriteString(fmt.Sprintf("  %-20s%-5s  (%2d%%)  %s\n",
 		"Bar binning:",
 		formatDuration(m.complete.BinTime),
 		int(float64(m.complete.BinTime.Milliseconds())*100/float64(totalMs)),
 		makeSparkline(float64(m.complete.BinTime.Milliseconds())/float64(totalMs), 30)))
 
-	s.WriteString(fmt.Sprintf("  %-19s%-5s  (%2d%%)  %s\n",
-		"Frame drawing:",
+	s.WriteString(fmt.Sprintf("  %-20s%-5s  (%2d%%)  %s\n",
+		"Rendering:",
 		formatDuration(m.complete.DrawTime),
 		int(float64(m.complete.DrawTime.Milliseconds())*100/float64(totalMs)),
 		makeSparkline(float64(m.complete.DrawTime.Milliseconds())/float64(totalMs), 30)))
 
-	s.WriteString(fmt.Sprintf("  %-19s%-5s  (%2d%%)  %s\n",
+	s.WriteString(fmt.Sprintf("  %-20s%-5s  (%2d%%)  %s\n",
 		"Video encoding:",
 		formatDuration(m.complete.EncodeTime),
 		int(float64(m.complete.EncodeTime.Milliseconds())*100/float64(totalMs)),
 		makeSparkline(float64(m.complete.EncodeTime.Milliseconds())/float64(totalMs), 30)))
 
-	// Audio flush
+	// Audio finalization
 	if m.complete.AudioFlushTime > 0 {
-		s.WriteString(fmt.Sprintf("  %-19s%-5s  (%2d%%)  %s\n",
-			"Audio encoding:",
+		s.WriteString(fmt.Sprintf("  %-20s%-5s  (%2d%%)  %s\n",
+			"Audio finalization:",
 			formatDuration(m.complete.AudioFlushTime),
 			int(float64(m.complete.AudioFlushTime.Milliseconds())*100/float64(totalMs)),
 			makeSparkline(float64(m.complete.AudioFlushTime.Milliseconds())/float64(totalMs), 30)))
@@ -425,14 +425,14 @@ func (m *pass2Model) renderComplete() string {
 		m.complete.DrawTime + m.complete.EncodeTime + m.complete.AudioFlushTime
 	otherTime := m.complete.TotalTime - accountedTime
 	if otherTime > 0 {
-		s.WriteString(fmt.Sprintf("  %-19s%-5s  (%2d%%)  %s\n",
+		s.WriteString(fmt.Sprintf("  %-20s%-5s  (%2d%%)  %s\n",
 			"Initialization:",
 			formatDuration(otherTime),
 			int(float64(otherTime.Milliseconds())*100/float64(totalMs)),
 			makeSparkline(float64(otherTime.Milliseconds())/float64(totalMs), 30)))
 	}
 
-	s.WriteString(fmt.Sprintf("  %-19s%s\n\n", "Total time:", formatDuration(m.complete.TotalTime)))
+	s.WriteString(fmt.Sprintf("  %-20s%s\n\n", "Total time:", formatDuration(m.complete.TotalTime)))
 
 	// Quality Metrics
 	s.WriteString(lipgloss.NewStyle().Faint(true).Render("Quality Metrics:"))
@@ -442,14 +442,14 @@ func (m *pass2Model) renderComplete() string {
 		float64(m.complete.TotalFrames)/videoDuration.Seconds()))
 
 	if m.complete.SamplesProcessed > 0 {
-		s.WriteString(fmt.Sprintf("  Audio: %d samples processed\n",
+		s.WriteString(fmt.Sprintf("  Audio: %d samples processed",
 			m.complete.SamplesProcessed))
 	}
 
 	return lipgloss.NewStyle().
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#4A9B4A")).
-		Padding(1, 2).
+		Padding(1, 1).
 		Render(s.String()) + "\n"
 }
 

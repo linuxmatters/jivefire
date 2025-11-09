@@ -138,7 +138,7 @@ func (m *pass1Model) renderProgress() string {
 		if elapsed == 0 {
 			elapsed = time.Since(m.startTime)
 		}
-		
+
 		s.WriteString(lipgloss.NewStyle().Faint(true).Render("Analyzing..."))
 		s.WriteString(fmt.Sprintf("  %d frames  │  Elapsed: %s\n\n",
 			m.lastUpdate.Frame,
@@ -165,7 +165,7 @@ func (m *pass1Model) renderProgress() string {
 		sampleRate := 44.1 // kHz - could be made dynamic
 		peakDB := 20 * math.Log10(m.lastUpdate.CurrentPeak)
 		rmsDB := 20 * math.Log10(m.lastUpdate.CurrentRMS)
-		
+
 		// Create styled stats display with fixed-width formatting to prevent shimmer
 		labelStyle := lipgloss.NewStyle().Faint(true)
 		valueStyle := lipgloss.NewStyle()
@@ -184,7 +184,6 @@ func (m *pass1Model) renderProgress() string {
 		s.WriteString("  │  ")
 		s.WriteString(labelStyle.Render("RMS Level:   "))
 		s.WriteString(valueStyle.Render(fmt.Sprintf("%6.1f dB", rmsDB)))
-		s.WriteString("\n\n")
 	}
 
 	return lipgloss.NewStyle().

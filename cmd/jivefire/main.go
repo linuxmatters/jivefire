@@ -530,6 +530,4 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 		cli.PrintError(fmt.Sprintf("during encoding: %v", encodingErr))
 		os.Exit(1)
 	}
-
-	cli.PrintSuccess(fmt.Sprintf("Done! Output: %s", outputFile))
 }
