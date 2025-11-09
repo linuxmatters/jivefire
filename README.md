@@ -10,7 +10,6 @@ Your podcast audio deserves more than a static image on YouTube. Jivefire transf
 
 ### What's Cooking
 
-
 - 🖼️ **Thumbnail generator**—YouTube-style PNG with your title, saved alongside the video
 - 🎬 **1280×720 @ 30fps** H.264/AAC MP4—YouTube-ready, no questions asked
   - 🎚️ **64 frequency bars** that actually look discrete (not that smeared spectrum nonsense)

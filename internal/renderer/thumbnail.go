@@ -19,14 +19,10 @@ import (
 	"golang.org/x/image/math/fixed"
 )
 
-const (
-	ThumbnailMargin = 30 // Margin in pixels from edges
-)
-
-var (
-	// Brand yellow color (#F8B31D) - same as used for framing lines
-	thumbnailTextColor = color.RGBA{R: 248, G: 179, B: 29, A: 255}
-)
+// getThumbnailTextColor returns the brand yellow color for thumbnail text
+func getThumbnailTextColor() color.RGBA {
+	return color.RGBA{R: config.TextColorR, G: config.TextColorG, B: config.TextColorB, A: 255}
+}
 
 // GenerateThumbnail creates a YouTube thumbnail with the title text overlaid
 // The thumbnail is the same resolution as the video (1280x720)
@@ -37,8 +33,8 @@ func GenerateThumbnail(outputPath string, title string) error {
 		return fmt.Errorf("failed to load thumbnail background: %w", err)
 	}
 
-	// Load the bold font
-	fontData, err := embeddedAssets.ReadFile("assets/Poppins-Bold.ttf")
+	// Load the bold font for thumbnail
+	fontData, err := embeddedAssets.ReadFile(config.ThumbnailFontAsset)
 	if err != nil {
 		return fmt.Errorf("failed to load bold font: %w", err)
 	}
@@ -74,7 +70,7 @@ func GenerateThumbnail(outputPath string, title string) error {
 
 // loadThumbnailBackground loads and scales the embedded thumbnail background
 func loadThumbnailBackground() (*image.RGBA, error) {
-	data, err := embeddedAssets.ReadFile("assets/thumb.png")
+	data, err := embeddedAssets.ReadFile(config.ThumbnailImageAsset)
 	if err != nil {
 		return nil, err
 	}
@@ -119,12 +115,12 @@ func splitTitle(title string) (string, string) {
 
 // findOptimalFontSize finds the largest font size that fits within constraints
 // Constraints:
-// - 30px margin from left and right edges
-// - Line 1 starts at top margin (30px)
+// - ThumbnailMargin from left and right edges
+// - Line 1 starts at top margin (ThumbnailMargin)
 // - Bottom edge of line 2 must not extend below center line (y=360)
 func findOptimalFontSize(parsedFont *truetype.Font, line1, line2 string) float64 {
 	centerY := config.Height / 2
-	maxWidth := config.Width - (2 * ThumbnailMargin)
+	maxWidth := config.Width - (2 * config.ThumbnailMargin)
 
 	// Start with a large size and reduce until it fits
 	for size := 150.0; size > 10.0; size -= 2.0 {
@@ -156,7 +152,7 @@ func findOptimalFontSize(parsedFont *truetype.Font, line1, line2 string) float64
 		// Line 1 bottom: margin + height1
 		// Line 2 top: margin + height1 + lineSpacing
 		// Line 2 bottom: margin + height1 + lineSpacing + height2
-		line2Bottom := ThumbnailMargin + height1 + lineSpacing + height2
+		line2Bottom := config.ThumbnailMargin + height1 + lineSpacing + height2
 
 		// Check if line 2 bottom fits above center line
 		if line2Bottom <= centerY {
@@ -177,9 +173,9 @@ func measureText(face font.Face, text string) (int, fixed.Rectangle26_6) {
 }
 
 // drawThumbnailText draws the title text on the thumbnail with a slight rotation
-// Line 1 is top-aligned at the 30px margin
+// Line 1 is top-aligned at the ThumbnailMargin
 // Bottom edge of line 2 must not extend below center line
-// Text is rotated 3 degrees clockwise for dynamic effect
+// Text is rotated ThumbnailTextRotationDegrees clockwise for dynamic effect
 func drawThumbnailText(img *image.RGBA, face font.Face, line1, line2 string) {
 	// Measure text dimensions - bounds.Min.Y is negative (ascent), bounds.Max.Y is positive (descent)
 	width1, bounds1 := measureText(face, line1)
@@ -224,8 +220,8 @@ func drawThumbnailText(img *image.RGBA, face font.Face, line1, line2 string) {
 	drawCenteredLineOnTemp(tempImg, face, line1, tempSize, line1BaselineY)
 	drawCenteredLineOnTemp(tempImg, face, line2, tempSize, line2BaselineY)
 
-	// Create rotation matrix for 3 degrees clockwise
-	angle := -3.0 * math.Pi / 180.0 // Negative for clockwise
+	// Create rotation matrix for thumbnail text rotation (clockwise)
+	angle := -config.ThumbnailTextRotationDegrees * math.Pi / 180.0 // Negative for clockwise
 	cos := math.Cos(angle)
 	sin := math.Sin(angle)
 
@@ -271,10 +267,10 @@ func drawThumbnailText(img *image.RGBA, face font.Face, line1, line2 string) {
 
 	// For vertical positioning:
 	// highestPointY is the highest point of the rotated text in tempImg coordinates
-	// We want this highest point to align with ThumbnailMargin in the final image
-	// So: destY + highestPointY = ThumbnailMargin
-	// Therefore: destY = ThumbnailMargin - highestPointY
-	destY := int(float64(ThumbnailMargin) - highestPointY)
+	// We want this highest point to align with config.ThumbnailMargin in the final image
+	// So: destY + highestPointY = config.ThumbnailMargin
+	// Therefore: destY = config.ThumbnailMargin - highestPointY
+	destY := int(float64(config.ThumbnailMargin) - highestPointY)
 
 	// Composite rotated text onto thumbnail
 	destRect := image.Rect(destX, destY, destX+tempSize, destY+tempSize)
@@ -289,7 +285,7 @@ func drawCenteredLineOnTemp(img *image.RGBA, face font.Face, text string, imgWid
 
 	d := &font.Drawer{
 		Dst:  img,
-		Src:  image.NewUniform(thumbnailTextColor),
+		Src:  image.NewUniform(getThumbnailTextColor()),
 		Face: face,
 	}
 

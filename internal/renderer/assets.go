@@ -22,7 +22,7 @@ var embeddedAssets embed.FS
 
 // LoadBackgroundImage loads and scales the embedded PNG background image
 func LoadBackgroundImage() (*image.RGBA, error) {
-	data, err := embeddedAssets.ReadFile("assets/bg.png")
+	data, err := embeddedAssets.ReadFile(config.BackgroundImageAsset)
 	if err != nil {
 		return nil, err
 	}
@@ -41,9 +41,9 @@ func LoadBackgroundImage() (*image.RGBA, error) {
 	return rgba, nil
 }
 
-// LoadFont loads the embedded TrueType font
+// LoadFont loads the embedded TrueType font for video title overlay
 func LoadFont(size float64) (font.Face, error) {
-	fontBytes, err := embeddedAssets.ReadFile("assets/Poppins-Regular.ttf")
+	fontBytes, err := embeddedAssets.ReadFile(config.VideoTitleFontAsset)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +67,7 @@ func DrawCenterText(img *image.RGBA, face font.Face, text string, centerY int) {
 	// Create a drawer
 	d := &font.Drawer{
 		Dst:  img,
-		Src:  image.NewUniform(color.RGBA{R: 248, G: 179, B: 29, A: 255}), // #F8B31D (brand yellow)
+		Src:  image.NewUniform(color.RGBA{R: config.TextColorR, G: config.TextColorG, B: config.TextColorB, A: 255}),
 		Face: face,
 	}
 
@@ -91,7 +91,7 @@ func DrawEpisodeNumber(img *image.RGBA, face font.Face, episodeNum string) {
 	// Create a drawer
 	d := &font.Drawer{
 		Dst:  img,
-		Src:  image.NewUniform(color.RGBA{R: 248, G: 179, B: 29, A: 255}), // #F8B31D (brand yellow)
+		Src:  image.NewUniform(color.RGBA{R: config.TextColorR, G: config.TextColorG, B: config.TextColorB, A: 255}),
 		Face: face,
 	}
 

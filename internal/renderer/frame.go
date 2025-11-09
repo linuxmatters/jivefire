@@ -62,14 +62,14 @@ func NewFrame(bgImage *image.RGBA, fontFace font.Face, episodeNum int, title str
 		barColorTable[alpha][2] = uint8(float64(config.BarColorB) * factor)
 	}
 
-	// Pre-render framing line pattern (yellow brand color)
+	// Pre-render framing line pattern (brand yellow from config)
 	framingLineData := make([]byte, totalWidth*4)
 	for px := 0; px < totalWidth; px++ {
 		offset := px * 4
-		framingLineData[offset] = 248   // R
-		framingLineData[offset+1] = 179 // G
-		framingLineData[offset+2] = 29  // B
-		framingLineData[offset+3] = 255 // A
+		framingLineData[offset] = config.TextColorR   // R
+		framingLineData[offset+1] = config.TextColorG // G
+		framingLineData[offset+2] = config.TextColorB // B
+		framingLineData[offset+3] = 255               // A
 	}
 
 	// Format episode number as two-digit string
@@ -306,10 +306,10 @@ func (f *Frame) applyTextOverlay() {
 	}
 }
 
-// drawFramingLines draws 4-pixel high horizontal lines above and below the center gap
-// using the text color (#F8B31D - brand yellow) to frame the title text
+// drawFramingLines draws horizontal lines above and below the center gap
+// using the text color from config to frame the title text
 func (f *Frame) drawFramingLines() {
-	const lineHeight = 4
+	lineHeight := config.FramingLineHeight
 
 	// Calculate line positions
 	// Top line: just above where upward bars end
