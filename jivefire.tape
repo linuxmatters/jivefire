@@ -69,6 +69,6 @@ Set WindowBarSize 32
 Set TypingSpeed 27ms
 Set Theme catppuccin-mocha
 
-Type "./jivefire --episode=42 --title='Testing Testing' testdata/dream.wav testdata/test.mp4" Sleep 250ms  Enter
+Type "./jivefire --episode=0 --title='Linux Matters Jivefire' testdata/sample.flac testdata/sample.mp4" Sleep 250ms  Enter
 
-Sleep 12s
+Sleep 13s
