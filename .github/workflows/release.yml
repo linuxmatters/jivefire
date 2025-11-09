@@ -9,45 +9,14 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    name: Create Release and Upload Assets
+  create-release:
+    name: Create Release
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - os: linux
-            arch: amd64
-            runner: ubuntu-latest
-            cc: gcc
-          - os: linux
-            arch: arm64
-            runner: ubuntu-latest
-            cc: aarch64-linux-gnu-gcc
-          - os: darwin
-            arch: amd64
-            runner: macos-latest
-            cc: cc
-          - os: darwin
-            arch: arm64
-            runner: macos-latest
-            cc: cc
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: '1.24'
-
-      - name: Install cross-compilation tools (Linux ARM64)
-        if: matrix.os == 'linux' && matrix.arch == 'arm64'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
 
       - name: Get version from tag
         id: get_version
@@ -92,49 +61,118 @@ jobs:
 
           cat CHANGELOG.md
 
-      - name: Build binary
-        env:
-          GOOS: ${{ matrix.os }}
-          GOARCH: ${{ matrix.arch }}
-          CGO_ENABLED: 1
-          CC: ${{ matrix.cc }}
-        run: |
-          VERSION=${{ steps.get_version.outputs.version }}
-          echo "Building jivefire $VERSION for ${{ matrix.os }}/${{ matrix.arch }}"
-          go build -ldflags="-X main.version=$VERSION" -o jivefire-${{ matrix.os }}-${{ matrix.arch }} ./cmd/jivefire
-
-          # Create checksum
-          if [ "${{ matrix.os }}" = "darwin" ]; then
-            shasum -a 256 jivefire-${{ matrix.os }}-${{ matrix.arch }} > jivefire-${{ matrix.os }}-${{ matrix.arch }}.sha256
-          else
-            sha256sum jivefire-${{ matrix.os }}-${{ matrix.arch }} > jivefire-${{ matrix.os }}-${{ matrix.arch }}.sha256
-          fi
-
-          ls -lh jivefire-${{ matrix.os }}-${{ matrix.arch }}
-          cat jivefire-${{ matrix.os }}-${{ matrix.arch }}.sha256
-
-      - name: Create Release and Upload Assets
-        uses: softprops/action-gh-release@v1
-        if: matrix.os == 'linux' && matrix.arch == 'amd64'  # Only create release once
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ steps.get_version.outputs.version }}
-          name: Jivefire ${{ steps.get_version.outputs.version }}
+          name: jivefire ${{ steps.get_version.outputs.version }}
           body_path: CHANGELOG.md
           draft: false
           prerelease: false
-          files: |
-            jivefire-*-*.*
-            *.sha256
 
-      - name: Upload Assets (non-Linux builds)
-        uses: softprops/action-gh-release@v1
-        if: matrix.os != 'linux' || matrix.arch != 'amd64'  # Upload to existing release for other builds
+  build-linux:
+    name: Build Linux ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    needs: create-release
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+      fail-fast: false
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.24'
+
+      - name: Install cross-compilation tools (ARM64)
+        if: matrix.arch == 'arm64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Get version from tag
+        id: get_version
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Build Linux binary
+        env:
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: 1
+          CC: ${{ matrix.arch == 'arm64' && 'aarch64-linux-gnu-gcc' || 'gcc' }}
+        run: |
+          VERSION=${{ steps.get_version.outputs.version }}
+          echo "Building jivefire $VERSION for linux/${{ matrix.arch }}"
+          go build -ldflags="-X main.version=$VERSION" -o jivefire-linux-${{ matrix.arch }} ./cmd/jivefire
+
+          # Create checksum
+          sha256sum jivefire-linux-${{ matrix.arch }} > jivefire-linux-${{ matrix.arch }}.sha256
+
+          ls -lh jivefire-linux-${{ matrix.arch }}
+          cat jivefire-linux-${{ matrix.arch }}.sha256
+
+      - name: Upload Assets to Release
+        uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ steps.get_version.outputs.version }}
           files: |
-            jivefire-${{ matrix.os }}-${{ matrix.arch }}
-            jivefire-${{ matrix.os }}-${{ matrix.arch }}.sha256
+            jivefire-linux-${{ matrix.arch }}
+            jivefire-linux-${{ matrix.arch }}.sha256
+
+  build-darwin:
+    name: Build macOS ${{ matrix.arch }}
+    runs-on: macos-latest
+    needs: create-release
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+      fail-fast: false
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.24'
+
+      - name: Get version from tag
+        id: get_version
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Build macOS binary
+        env:
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: 1
+        run: |
+          VERSION=${{ steps.get_version.outputs.version }}
+          echo "Building jivefire $VERSION for darwin/${{ matrix.arch }}"
+          go build -ldflags="-X main.version=$VERSION" -o jivefire-darwin-${{ matrix.arch }} ./cmd/jivefire
+
+          # Create checksum
+          shasum -a 256 jivefire-darwin-${{ matrix.arch }} > jivefire-darwin-${{ matrix.arch }}.sha256
+
+          ls -lh jivefire-darwin-${{ matrix.arch }}
+          cat jivefire-darwin-${{ matrix.arch }}.sha256
+
+      - name: Upload Assets to Release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.get_version.outputs.version }}
+          files: |
+            jivefire-darwin-${{ matrix.arch }}
+            jivefire-darwin-${{ matrix.arch }}.sha256
