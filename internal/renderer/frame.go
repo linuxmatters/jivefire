@@ -48,12 +48,12 @@ func NewFrame(bgImage *image.RGBA, fontFace font.Face, episodeNum int, title str
 	maxBarHeight := centerY - config.CenterGap/2
 
 	// Get colors from runtime config (uses override or default)
+	barR, barG, barB := runtimeConfig.GetBarColor()
 	textR, textG, textB := runtimeConfig.GetTextColor()
 
 	// Pre-compute intensity gradient table (0.5 to 1.0 range for opaque gradient)
 	// This creates a fade from dim at tips to bright at center without alpha blending
 	intensityTable := make([]uint8, maxBarHeight)
-
 	for i := 0; i < maxBarHeight; i++ {
 		distanceFromCenter := float64(i) / float64(maxBarHeight)
 		intensityFactor := 1.0 - (distanceFromCenter * 0.5) // 0.5 at tips, 1.0 at center
@@ -65,9 +65,9 @@ func NewFrame(bgImage *image.RGBA, fontFace font.Face, episodeNum int, title str
 	barColorTable := make([][3]uint8, 256)
 	for intensity := 0; intensity < 256; intensity++ {
 		factor := float64(intensity) / 255.0
-		barColorTable[intensity][0] = uint8(float64(config.BarColorR) * factor)
-		barColorTable[intensity][1] = uint8(float64(config.BarColorG) * factor)
-		barColorTable[intensity][2] = uint8(float64(config.BarColorB) * factor)
+		barColorTable[intensity][0] = uint8(float64(barR) * factor)
+		barColorTable[intensity][1] = uint8(float64(barG) * factor)
+		barColorTable[intensity][2] = uint8(float64(barB) * factor)
 	}
 
 	// Pre-render framing line pattern (text color from config)
