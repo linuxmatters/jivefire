@@ -48,7 +48,6 @@ func NewFrame(bgImage *image.RGBA, fontFace font.Face, episodeNum int, title str
 	maxBarHeight := centerY - config.CenterGap/2
 
 	// Get colors from runtime config (uses override or default)
-	barR, barG, barB := runtimeConfig.GetBarColor()
 	textR, textG, textB := runtimeConfig.GetTextColor()
 
 	// Pre-compute intensity gradient table (0.5 to 1.0 range for opaque gradient)
