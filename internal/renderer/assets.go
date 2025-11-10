@@ -6,6 +6,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"os"
 
 	"github.com/golang/freetype"
 	"github.com/golang/freetype/truetype"
@@ -20,9 +21,22 @@ import (
 //go:embed assets/Poppins-Bold.ttf
 var embeddedAssets embed.FS
 
-// LoadBackgroundImage loads and scales the embedded PNG background image
-func LoadBackgroundImage() (*image.RGBA, error) {
-	data, err := embeddedAssets.ReadFile(config.BackgroundImageAsset)
+// LoadBackgroundImage loads and scales the background image (from custom path or embedded asset)
+func LoadBackgroundImage(runtimeConfig *config.RuntimeConfig) (*image.RGBA, error) {
+	imagePath := runtimeConfig.GetBackgroundImagePath()
+
+	var data []byte
+	var err error
+
+	// Check if using custom image path or embedded asset
+	if runtimeConfig.BackgroundImagePath != "" {
+		// Load from filesystem
+		data, err = os.ReadFile(imagePath)
+	} else {
+		// Load from embedded assets
+		data, err = embeddedAssets.ReadFile(imagePath)
+	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -63,11 +77,11 @@ func LoadFont(size float64) (font.Face, error) {
 }
 
 // DrawCenterText draws text centered horizontally at the specified Y position
-func DrawCenterText(img *image.RGBA, face font.Face, text string, centerY int) {
+func DrawCenterText(img *image.RGBA, face font.Face, text string, centerY int, textColor color.RGBA) {
 	// Create a drawer
 	d := &font.Drawer{
 		Dst:  img,
-		Src:  image.NewUniform(color.RGBA{R: config.TextColorR, G: config.TextColorG, B: config.TextColorB, A: 255}),
+		Src:  image.NewUniform(textColor),
 		Face: face,
 	}
 
@@ -87,11 +101,11 @@ func DrawCenterText(img *image.RGBA, face font.Face, text string, centerY int) {
 }
 
 // DrawEpisodeNumber draws the episode number in the top right corner
-func DrawEpisodeNumber(img *image.RGBA, face font.Face, episodeNum string) {
+func DrawEpisodeNumber(img *image.RGBA, face font.Face, episodeNum string, textColor color.RGBA) {
 	// Create a drawer
 	d := &font.Drawer{
 		Dst:  img,
-		Src:  image.NewUniform(color.RGBA{R: config.TextColorR, G: config.TextColorG, B: config.TextColorB, A: 255}),
+		Src:  image.NewUniform(textColor),
 		Face: face,
 	}
 

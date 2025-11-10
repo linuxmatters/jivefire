@@ -25,13 +25,17 @@ import (
 var version = "dev"
 
 var CLI struct {
-	Input     string `arg:"" name:"input" help:"Input WAV file" optional:""`
-	Output    string `arg:"" name:"output" help:"Output MP4 file" optional:""`
-	Episode   int    `help:"Episode number" default:"0"`
-	Title     string `help:"Podcast title" default:"Podcast Title"`
-	Channels  int    `help:"Audio channels in MP4: 1 (mono) or 2 (stereo)" default:"1"`
-	NoPreview bool   `help:"Disable video preview during encoding"`
-	Version   bool   `help:"Show version information"`
+	Input           string `arg:"" name:"input" help:"Input WAV file" optional:""`
+	Output          string `arg:"" name:"output" help:"Output MP4 file" optional:""`
+	Episode         int    `help:"Episode number" default:"0"`
+	Title           string `help:"Podcast title" default:"Podcast Title"`
+	Channels        int    `help:"Audio channels in MP4: 1 (mono) or 2 (stereo)" default:"1"`
+	BarColor        string `help:"Bar color in hex format (e.g., #A40000 or A40000)"`
+	TextColor       string `help:"Text color in hex format (e.g., #F8B31D or F8B31D)"`
+	BackgroundImage string `help:"Path to custom background image (PNG, 1280x720)"`
+	ThumbnailImage  string `help:"Path to custom thumbnail image (PNG, 1280x720)"`
+	NoPreview       bool   `help:"Disable video preview during encoding"`
+	Version         bool   `help:"Show version information"`
 }
 
 func main() {
@@ -67,6 +71,51 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Build runtime config from CLI arguments
+	runtimeConfig := &config.RuntimeConfig{}
+
+	// Parse and validate bar color if provided
+	if CLI.BarColor != "" {
+		r, g, b, err := config.ParseHexColor(CLI.BarColor)
+		if err != nil {
+			cli.PrintError(fmt.Sprintf("invalid --bar-color: %v", err))
+			os.Exit(1)
+		}
+		runtimeConfig.BarColorR = &r
+		runtimeConfig.BarColorG = &g
+		runtimeConfig.BarColorB = &b
+	}
+
+	// Parse and validate text color if provided
+	if CLI.TextColor != "" {
+		r, g, b, err := config.ParseHexColor(CLI.TextColor)
+		if err != nil {
+			cli.PrintError(fmt.Sprintf("invalid --text-color: %v", err))
+			os.Exit(1)
+		}
+		runtimeConfig.TextColorR = &r
+		runtimeConfig.TextColorG = &g
+		runtimeConfig.TextColorB = &b
+	}
+
+	// Validate background image if provided
+	if CLI.BackgroundImage != "" {
+		if _, err := os.Stat(CLI.BackgroundImage); os.IsNotExist(err) {
+			cli.PrintError(fmt.Sprintf("background image does not exist: %s", CLI.BackgroundImage))
+			os.Exit(1)
+		}
+		runtimeConfig.BackgroundImagePath = CLI.BackgroundImage
+	}
+
+	// Validate thumbnail image if provided
+	if CLI.ThumbnailImage != "" {
+		if _, err := os.Stat(CLI.ThumbnailImage); os.IsNotExist(err) {
+			cli.PrintError(fmt.Sprintf("thumbnail image does not exist: %s", CLI.ThumbnailImage))
+			os.Exit(1)
+		}
+		runtimeConfig.ThumbnailImagePath = CLI.ThumbnailImage
+	}
+
 	inputFile := CLI.Input
 	outputFile := CLI.Output
 	channels := CLI.Channels
@@ -75,15 +124,15 @@ func main() {
 	_ = ctx // Kong context available for future use
 
 	// Generate video using 2-pass streaming approach
-	generateVideo(inputFile, outputFile, channels, noPreview)
+	generateVideo(inputFile, outputFile, channels, noPreview, runtimeConfig)
 }
 
-func generateVideo(inputFile string, outputFile string, channels int, noPreview bool) {
+func generateVideo(inputFile string, outputFile string, channels int, noPreview bool, runtimeConfig *config.RuntimeConfig) {
 	// Track overall timing from the very start
 	overallStartTime := time.Now()
 
 	thumbnailPath := strings.Replace(outputFile, ".mp4", ".png", 1)
-	if err := renderer.GenerateThumbnail(thumbnailPath, CLI.Title); err != nil {
+	if err := renderer.GenerateThumbnail(thumbnailPath, CLI.Title, runtimeConfig); err != nil {
 		cli.PrintError(fmt.Sprintf("failed to generate thumbnail: %v", err))
 		os.Exit(1)
 	}
@@ -183,8 +232,8 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 	go func() {
 		defer enc.Close()
 
-		// Load background image (embedded)
-		bgImage, err := renderer.LoadBackgroundImage()
+		// Load background image (custom or embedded)
+		bgImage, err := renderer.LoadBackgroundImage(runtimeConfig)
 		if err != nil {
 			bgImage = nil
 		}
@@ -197,7 +246,7 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 
 		// Create audio processor and frame renderer
 		processor := audio.NewProcessor()
-		frame := renderer.NewFrame(bgImage, fontFace, CLI.Episode, CLI.Title)
+		frame := renderer.NewFrame(bgImage, fontFace, CLI.Episode, CLI.Title, runtimeConfig)
 
 		// Calculate frames from profile
 		numFrames := profile.NumFrames
