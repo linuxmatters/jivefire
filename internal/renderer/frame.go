@@ -26,8 +26,8 @@ type Frame struct {
 
 	// Pre-computed values
 	maxBarHeight    int
-	alphaTable      []uint8    // Pre-computed alpha values for gradient
-	barColorTable   [][3]uint8 // Pre-computed bar colors at different alpha levels
+	intensityTable  []uint8    // Pre-computed intensity values for opaque gradient (0.5 to 1.0)
+	barColorTable   [][3]uint8 // Pre-computed bar colors at different intensity levels
 	framingLineData []byte     // Pre-rendered framing line pixel pattern
 	hasBackground   bool
 }
@@ -51,21 +51,24 @@ func NewFrame(bgImage *image.RGBA, fontFace font.Face, episodeNum int, title str
 	barR, barG, barB := runtimeConfig.GetBarColor()
 	textR, textG, textB := runtimeConfig.GetTextColor()
 
-	// Pre-compute alpha gradient table (0.5 to 1.0 range)
-	alphaTable := make([]uint8, maxBarHeight)
+	// Pre-compute intensity gradient table (0.5 to 1.0 range for opaque gradient)
+	// This creates a fade from dim at tips to bright at center without alpha blending
+	intensityTable := make([]uint8, maxBarHeight)
+
 	for i := 0; i < maxBarHeight; i++ {
 		distanceFromCenter := float64(i) / float64(maxBarHeight)
-		alphaFactor := 1.0 - (distanceFromCenter * 0.5)
-		alphaTable[i] = uint8(alphaFactor * 255)
+		intensityFactor := 1.0 - (distanceFromCenter * 0.5) // 0.5 at tips, 1.0 at center
+		intensityTable[i] = uint8(intensityFactor * 255)
 	}
 
-	// Pre-compute bar colors at different alpha levels (0-255)
+	// Pre-compute bar colors at different intensity levels (0-255)
+	// Colors are fully opaque - RGB values dimmed by intensity, alpha always 255
 	barColorTable := make([][3]uint8, 256)
-	for alpha := 0; alpha < 256; alpha++ {
-		factor := float64(alpha) / 255.0
-		barColorTable[alpha][0] = uint8(float64(barR) * factor)
-		barColorTable[alpha][1] = uint8(float64(barG) * factor)
-		barColorTable[alpha][2] = uint8(float64(barB) * factor)
+	for intensity := 0; intensity < 256; intensity++ {
+		factor := float64(intensity) / 255.0
+		barColorTable[intensity][0] = uint8(float64(config.BarColorR) * factor)
+		barColorTable[intensity][1] = uint8(float64(config.BarColorG) * factor)
+		barColorTable[intensity][2] = uint8(float64(config.BarColorB) * factor)
 	}
 
 	// Pre-render framing line pattern (text color from config)
@@ -95,7 +98,7 @@ func NewFrame(bgImage *image.RGBA, fontFace font.Face, episodeNum int, title str
 		title:           title,
 		textColor:       color.RGBA{R: textR, G: textG, B: textB, A: 255},
 		maxBarHeight:    maxBarHeight,
-		alphaTable:      alphaTable,
+		intensityTable:  intensityTable,
 		barColorTable:   barColorTable,
 		framingLineData: framingLineData,
 		hasBackground:   bgImage != nil,
@@ -165,15 +168,11 @@ func (f *Frame) drawBars(barHeights []float64) {
 			barHeight = f.maxBarHeight
 		}
 
-		// Render upward bar only (left half)
+		// Render upward bar only (left half) - always opaque, no background blending needed
 		yStart := f.centerY - barHeight - config.CenterGap/2
 		yEnd := f.centerY - config.CenterGap/2
 
-		if f.hasBackground {
-			f.renderBarWithBackground(x, yStart, yEnd, barHeight)
-		} else {
-			f.renderBarNoBackground(x, yStart, yEnd, barHeight, pixelPattern)
-		}
+		f.renderBar(x, yStart, yEnd, barHeight, pixelPattern)
 	}
 
 	// Now mirror in 3 operations to fill remaining 3/4 of the bars:
@@ -203,21 +202,21 @@ func (f *Frame) drawBars(barHeights []float64) {
 	}
 }
 
-// renderBarNoBackground renders a single upward bar without background blending
-func (f *Frame) renderBarNoBackground(x, yStart, yEnd, barHeight int, pixelPattern []byte) {
+// renderBar renders a single upward bar with opaque gradient (no alpha blending)
+func (f *Frame) renderBar(x, yStart, yEnd, barHeight int, pixelPattern []byte) {
 	for y := yStart; y < yEnd; y++ {
 		if y < 0 {
 			continue
 		}
 
-		// Calculate alpha for fade gradient (dim at tip → bright at center)
+		// Calculate intensity for fade gradient (dim at tip → bright at center)
 		distanceFromCenter := yEnd - 1 - y
-		alphaIndex := (distanceFromCenter * f.maxBarHeight) / barHeight
-		if alphaIndex >= f.maxBarHeight {
-			alphaIndex = f.maxBarHeight - 1
+		intensityIndex := (distanceFromCenter * f.maxBarHeight) / barHeight
+		if intensityIndex >= f.maxBarHeight {
+			intensityIndex = f.maxBarHeight - 1
 		}
-		alpha := f.alphaTable[alphaIndex]
-		colors := &f.barColorTable[alpha]
+		intensity := f.intensityTable[intensityIndex]
+		colors := &f.barColorTable[intensity]
 
 		// Fill pixel pattern once for this scanline
 		for px := 0; px < config.BarWidth; px++ {
@@ -225,45 +224,12 @@ func (f *Frame) renderBarNoBackground(x, yStart, yEnd, barHeight int, pixelPatte
 			pixelPattern[offset] = colors[0]
 			pixelPattern[offset+1] = colors[1]
 			pixelPattern[offset+2] = colors[2]
-			pixelPattern[offset+3] = 255
+			pixelPattern[offset+3] = 255 // Fully opaque
 		}
 
 		// Write entire bar width with single copy
 		offset := y*f.img.Stride + x*4
 		copy(f.img.Pix[offset:offset+config.BarWidth*4], pixelPattern)
-	}
-}
-
-// renderBarWithBackground renders a single upward bar with background blending
-func (f *Frame) renderBarWithBackground(x, yStart, yEnd, barHeight int) {
-	for y := yStart; y < yEnd; y++ {
-		if y < 0 {
-			continue
-		}
-
-		// Calculate alpha for fade gradient (dim at tip → bright at center)
-		distanceFromCenter := yEnd - 1 - y
-		alphaIndex := (distanceFromCenter * f.maxBarHeight) / barHeight
-		if alphaIndex >= f.maxBarHeight {
-			alphaIndex = f.maxBarHeight - 1
-		}
-		alpha := f.alphaTable[alphaIndex]
-		alphaF := float64(alpha) / 255.0
-		invAlphaF := 1.0 - alphaF
-
-		offset := y*f.img.Stride + x*4
-		for px := 0; px < config.BarWidth; px++ {
-			pixOffset := offset + px*4
-
-			// Alpha blend with background
-			bgR := f.img.Pix[pixOffset]
-			bgG := f.img.Pix[pixOffset+1]
-			bgB := f.img.Pix[pixOffset+2]
-
-			f.img.Pix[pixOffset] = uint8(float64(config.BarColorR)*alphaF + float64(bgR)*invAlphaF)
-			f.img.Pix[pixOffset+1] = uint8(float64(config.BarColorG)*alphaF + float64(bgG)*invAlphaF)
-			f.img.Pix[pixOffset+2] = uint8(float64(config.BarColorB)*alphaF + float64(bgB)*invAlphaF)
-		}
 	}
 }
 

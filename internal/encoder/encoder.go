@@ -175,8 +175,8 @@ func (e *Encoder) Initialize() error {
 	var opts *ffmpeg.AVDictionary
 	defer ffmpeg.AVDictFree(&opts)
 
-	// CRF 23 = good quality for busy visualizations
-	ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("crf"), ffmpeg.ToCStr("28"), 0)
+	// CRF 24 = good quality for busy visualizations
+	ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("crf"), ffmpeg.ToCStr("24"), 0)
 	// Faster preset prioritizes encoding speed
 	ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("preset"), ffmpeg.ToCStr("veryfast"), 0)
 	// Tune for animation content
@@ -1458,7 +1458,6 @@ func (e *Encoder) ProcessAudio() error {
 
 // Close finalizes the output file and frees resources
 func (e *Encoder) Close() error {
-
 
 	// Flush encoder
 	if e.videoCodec != nil {
