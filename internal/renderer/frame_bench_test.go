@@ -30,7 +30,8 @@ func BenchmarkFrameWithBackground(b *testing.B) {
 		bgImage.Pix[i+3] = 255
 	}
 
-	frame := NewFrame(bgImage, nil, 0, "")
+	runtimeConfig := &config.RuntimeConfig{}
+	frame := NewFrame(bgImage, nil, 0, "", runtimeConfig)
 	barHeights := generateTestBarHeights()
 
 	b.ResetTimer()
@@ -42,7 +43,8 @@ func BenchmarkFrameWithBackground(b *testing.B) {
 // BenchmarkFrameNoBackground benchmarks frame rendering without background (black)
 func BenchmarkFrameNoBackground(b *testing.B) {
 	// Setup - no background
-	frame := NewFrame(nil, nil, 0, "")
+	runtimeConfig := &config.RuntimeConfig{}
+	frame := NewFrame(nil, nil, 0, "", runtimeConfig)
 	barHeights := generateTestBarHeights()
 
 	b.ResetTimer()
@@ -56,7 +58,8 @@ func BenchmarkFrameWithText(b *testing.B) {
 	// Setup
 	bgImage := image.NewRGBA(image.Rect(0, 0, config.Width, config.Height))
 	fontFace := basicfont.Face7x13
-	frame := NewFrame(bgImage, fontFace, 1, "Test Episode")
+	runtimeConfig := &config.RuntimeConfig{}
+	frame := NewFrame(bgImage, fontFace, 1, "Test Episode", runtimeConfig)
 	barHeights := generateTestBarHeights()
 
 	b.ResetTimer()
@@ -80,7 +83,8 @@ func TestFrameRendering(t *testing.T) {
 	}
 
 	fontFace := basicfont.Face7x13
-	frame := NewFrame(bgImage, fontFace, 42, "Linux Matters")
+	runtimeConfig := &config.RuntimeConfig{}
+	frame := NewFrame(bgImage, fontFace, 42, "Linux Matters", runtimeConfig)
 
 	// Test with various bar heights
 	barHeights := generateTestBarHeights()
