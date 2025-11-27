@@ -40,7 +40,6 @@ type Pass2Complete struct {
 	BinTime          time.Duration
 	DrawTime         time.Duration
 	EncodeTime       time.Duration
-	AudioFlushTime   time.Duration
 	TotalTime        time.Duration
 	Pass1Time        time.Duration // Time spent in Pass 1 analysis
 	SamplesProcessed int64
@@ -411,18 +410,9 @@ func (m *pass2Model) renderComplete() string {
 		int(float64(m.complete.EncodeTime.Milliseconds())*100/float64(totalMs)),
 		makeSparkline(float64(m.complete.EncodeTime.Milliseconds())/float64(totalMs), 30)))
 
-	// Audio finalization
-	if m.complete.AudioFlushTime > 0 {
-		s.WriteString(fmt.Sprintf("  %-20s%-5s  (%2d%%)  %s\n",
-			"Audio finalization:",
-			formatDuration(m.complete.AudioFlushTime),
-			int(float64(m.complete.AudioFlushTime.Milliseconds())*100/float64(totalMs)),
-			makeSparkline(float64(m.complete.AudioFlushTime.Milliseconds())/float64(totalMs), 30)))
-	}
-
 	// Calculate and display "other" time (overhead, I/O, etc.)
 	accountedTime := m.complete.Pass1Time + m.complete.FFTTime + m.complete.BinTime +
-		m.complete.DrawTime + m.complete.EncodeTime + m.complete.AudioFlushTime
+		m.complete.DrawTime + m.complete.EncodeTime
 	otherTime := m.complete.TotalTime - accountedTime
 	if otherTime > 0 {
 		s.WriteString(fmt.Sprintf("  %-20s%-5s  (%2d%%)  %s\n",

@@ -1,6 +1,6 @@
 # Jivefire Architecture
 
-**TL;DR:** 2-pass streaming audio visualiser that generates broadcast-ready MP4s from podcast audio. Pure Go audio decoding + ffmpeg-statigo static linking = single deployable binary.
+**TL;DR:** 2-pass streaming audio visualiser that generates broadcast-ready MP4s from podcast audio. FFmpeg-based audio decoding + ffmpeg-statigo static linking = single deployable binary with broad format support.
 
 ---
 
@@ -36,22 +36,28 @@ Memory-efficient approach: analyse first, render second.
 
 **Why not single-pass?** Naive approach requires pre-loading entire audio file into memory (600MB for 30 minutes). 2-pass reduces memory by 92% while enabling optimal bar height scaling.
 
-### 3. **Pure Go Audio Decoders**
-Supports WAV, MP3, FLAC via pure Go libraries:
-- WAV: `go-audio/wav`
-- MP3: `sukus21/go-mp3`
-- FLAC: `mewkiz/flac`
+### 3. **Unified FFmpeg Audio Pipeline**
+Audio decoding uses ffmpeg-statigo's libavformat/libavcodec, supporting any format FFmpeg handles: MP3, FLAC, WAV, OGG, AAC, and more.
 
-**Why pure Go?** Maintains single-binary distribution without codec dependencies. Automatic stereo-to-mono downmixing. Format detection via file extension.
+**Why FFmpeg for decoding?** Single decode path for all formats. Audio samples are decoded once and shared between FFT analysis (Pass 1) and AAC encoding (Pass 2). The unified pipeline eliminates the "catch-up" delay that occurred when audio was re-decoded during encoding.
+
+**Architecture:**
+- `FFmpegDecoder` implements the `AudioDecoder` interface
+- Streaming decode: reads chunks on demand, no full-file buffering
+- Automatic stereo-to-mono downmixing for visualisation
+- Sample rate preserved for AAC encoding
 
 ---
 
 ## Processing Pipeline
 
 ```
-Input Audio (WAV/MP3/FLAC)
+Input Audio (MP3/FLAC/WAV/OGG/AAC/...)
     ↓
-Pure Go Decoder (streaming, 2048 samples/frame)
+FFmpeg Decoder (ffmpeg-statigo, streaming)
+    ├─ libavformat for demuxing
+    ├─ libavcodec for decoding
+    └─ Automatic stereo→mono downmix
     ↓
 FFT Analysis (gonum/fourier)
     ├─ 2048-point Hanning window
@@ -73,9 +79,10 @@ ffmpeg-statigo H.264 Encoder (libx264)
     └─ yuv420p pixel format
     ↓
 ffmpeg-statigo AAC Encoder
-    ├─ Audio FIFO buffer (2048→1024 frame size mismatch)
-    ├─ int16/float32 → float32 planar conversion
-    └─ Mono→stereo duplication
+    ├─ Receives pre-decoded samples via WriteAudioSamples()
+    ├─ Audio FIFO buffer (handles frame size mismatches)
+    ├─ float32 → float32 planar conversion
+    └─ Mono or stereo output
     ↓
 MP4 Muxer (libavformat)
     └─ Interleaved audio/video packets
@@ -121,10 +128,11 @@ Preview renders via Unicode blocks (`▁▂▃▄▅▆▇█`) using actual bar
 ```
 cmd/jivefire/          # CLI entry point, 2-pass coordinator
 internal/
-  audio/               # Pure Go decoders (WAV/MP3/FLAC)
+  audio/               # Audio processing
+  ├─ ffmpeg_decoder.go # FFmpeg-based decoder (AudioDecoder interface)
   ├─ analyzer.go       # FFT analysis, bar binning
-  ├─ decoder.go        # AudioDecoder interface
-  └─ reader.go         # Streaming reader with format detection
+  ├─ decoder.go        # AudioDecoder interface definition
+  └─ reader.go         # Streaming reader wrapper
 
   encoder/             # ffmpeg-statigo wrapper
   ├─ encoder.go        # H.264 + AAC encoding, FIFO buffer
@@ -172,7 +180,7 @@ FFT bar binning logic mirrors CAVA's approach, making it familiar territory for 
 
 This a Jivefire, a Go project, that encodes podcast audio file to MP4 videos suitable for uploading to YouTube.
 
-Orientate yourself with the project by reading the documentation (README.md and docs/ARCHITECTURE.md) and analysing the code. This project uses `ffmpeg-statigo` for FFmpeg 8.0 static bindings, included as a git submodule in `vendor/ffmpeg-statigo`.
+Orientate yourself with the project by reading the documentation (README.md and docs/ARCHITECTURE.md) and analysing the code. This project uses `ffmpeg-statigo` for FFmpeg 8.0 static bindings, included as a git submodule in `third_party/ffmpeg-statigo`.
 
 Sample audio file is in `testdata/`. You should only build and test via `just` commands. We are using NixOS as the host operating system and `flake.nix` provides tooling for the development shell. I use the `fish` shell. If you need to create "throw-away" test code, the put it in `testdata/`.
 

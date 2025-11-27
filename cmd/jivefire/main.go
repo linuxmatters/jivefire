@@ -210,7 +210,7 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 		Height:        config.Height,
 		Framerate:     config.FPS,
 		SampleRate:    reader.SampleRate(), // Use sample rate from audio file
-		AudioChannels: channels,             // Mono (1) or stereo (2)
+		AudioChannels: channels,            // Mono (1) or stereo (2)
 	})
 	if err != nil {
 		cli.PrintError(fmt.Sprintf("creating encoder: %v", err))
@@ -226,7 +226,7 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 	// Run rendering in goroutine
 	var encodingErr error
 	var perfStats struct {
-		fftTime, binTime, drawTime, writeTime, audioFlushTime, totalTime time.Duration
+		fftTime, binTime, drawTime, writeTime, totalTime time.Duration
 	}
 
 	go func() {
@@ -519,13 +519,11 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 
 		// Flush any remaining audio after all video frames are written
 		// This encodes any samples remaining in the FIFO and flushes the encoder
-		audioFlushStart := time.Now()
 		if err := enc.FlushAudioEncoder(); err != nil {
 			encodingErr = fmt.Errorf("error flushing audio: %w", err)
 			p2.Quit()
 			return
 		}
-		audioFlushTime := time.Since(audioFlushStart)
 
 		// Finalize encoding
 		if err := enc.Close(); err != nil {
@@ -542,7 +540,6 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 		perfStats.binTime = totalBin
 		perfStats.drawTime = totalDraw
 		perfStats.writeTime = totalWrite
-		perfStats.audioFlushTime = audioFlushTime
 		perfStats.totalTime = totalTime
 
 		// Get actual file size
@@ -568,7 +565,6 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 			BinTime:          totalBin,
 			DrawTime:         totalDraw,
 			EncodeTime:       totalWrite,
-			AudioFlushTime:   audioFlushTime,
 			TotalTime:        overallTotalTime, // Use overall total, not just Pass 2
 			Pass1Time:        pass1Duration,
 			SamplesProcessed: samplesProcessed,
