@@ -238,8 +238,8 @@ func (d *FFmpegDecoder) extractSamples() ([]float64, error) {
 
 		switch sampleFormat {
 		case 6: // AVSampleFmtS16P - planar 16-bit signed
-			leftSlice := (*[1 << 30]byte)(unsafe.Pointer(leftPtr))[:nbSamples*2:nbSamples*2]
-			rightSlice := (*[1 << 30]byte)(unsafe.Pointer(rightPtr))[:nbSamples*2:nbSamples*2]
+			leftSlice := (*[1 << 30]byte)(unsafe.Pointer(leftPtr))[: nbSamples*2 : nbSamples*2]
+			rightSlice := (*[1 << 30]byte)(unsafe.Pointer(rightPtr))[: nbSamples*2 : nbSamples*2]
 			for i := 0; i < nbSamples; i++ {
 				leftVal := int16(leftSlice[i*2]) | int16(leftSlice[i*2+1])<<8
 				rightVal := int16(rightSlice[i*2]) | int16(rightSlice[i*2+1])<<8
@@ -247,8 +247,8 @@ func (d *FFmpegDecoder) extractSamples() ([]float64, error) {
 			}
 
 		case 7: // AVSampleFmtS32P - planar 32-bit signed (FLAC)
-			leftSlice := (*[1 << 30]byte)(unsafe.Pointer(leftPtr))[:nbSamples*4:nbSamples*4]
-			rightSlice := (*[1 << 30]byte)(unsafe.Pointer(rightPtr))[:nbSamples*4:nbSamples*4]
+			leftSlice := (*[1 << 30]byte)(unsafe.Pointer(leftPtr))[: nbSamples*4 : nbSamples*4]
+			rightSlice := (*[1 << 30]byte)(unsafe.Pointer(rightPtr))[: nbSamples*4 : nbSamples*4]
 			for i := 0; i < nbSamples; i++ {
 				leftVal := int32(leftSlice[i*4]) |
 					int32(leftSlice[i*4+1])<<8 |
@@ -262,8 +262,8 @@ func (d *FFmpegDecoder) extractSamples() ([]float64, error) {
 			}
 
 		case 8: // AVSampleFmtFltp - planar float
-			leftSlice := (*[1 << 30]byte)(unsafe.Pointer(leftPtr))[:nbSamples*4:nbSamples*4]
-			rightSlice := (*[1 << 30]byte)(unsafe.Pointer(rightPtr))[:nbSamples*4:nbSamples*4]
+			leftSlice := (*[1 << 30]byte)(unsafe.Pointer(leftPtr))[: nbSamples*4 : nbSamples*4]
+			rightSlice := (*[1 << 30]byte)(unsafe.Pointer(rightPtr))[: nbSamples*4 : nbSamples*4]
 			for i := 0; i < nbSamples; i++ {
 				leftBits := uint32(leftSlice[i*4]) |
 					uint32(leftSlice[i*4+1])<<8 |
@@ -292,14 +292,14 @@ func (d *FFmpegDecoder) extractSamples() ([]float64, error) {
 
 		switch sampleFormat {
 		case 6: // AVSampleFmtS16P
-			dataSlice := (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[:nbSamples*2:nbSamples*2]
+			dataSlice := (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[: nbSamples*2 : nbSamples*2]
 			for i := 0; i < nbSamples; i++ {
 				val := int16(dataSlice[i*2]) | int16(dataSlice[i*2+1])<<8
 				samples[i] = float64(val) / 32768.0
 			}
 
 		case 7: // AVSampleFmtS32P
-			dataSlice := (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[:nbSamples*4:nbSamples*4]
+			dataSlice := (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[: nbSamples*4 : nbSamples*4]
 			for i := 0; i < nbSamples; i++ {
 				val := int32(dataSlice[i*4]) |
 					int32(dataSlice[i*4+1])<<8 |
@@ -309,7 +309,7 @@ func (d *FFmpegDecoder) extractSamples() ([]float64, error) {
 			}
 
 		case 8: // AVSampleFmtFltp
-			dataSlice := (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[:nbSamples*4:nbSamples*4]
+			dataSlice := (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[: nbSamples*4 : nbSamples*4]
 			for i := 0; i < nbSamples; i++ {
 				bits := uint32(dataSlice[i*4]) |
 					uint32(dataSlice[i*4+1])<<8 |
@@ -331,14 +331,14 @@ func (d *FFmpegDecoder) extractSamples() ([]float64, error) {
 		switch sampleFormat {
 		case 1: // AVSampleFmtS16 - interleaved 16-bit signed
 			if channels == 1 {
-				dataSlice := (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[:nbSamples*2:nbSamples*2]
+				dataSlice := (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[: nbSamples*2 : nbSamples*2]
 				for i := 0; i < nbSamples; i++ {
 					val := int16(dataSlice[i*2]) | int16(dataSlice[i*2+1])<<8
 					samples[i] = float64(val) / 32768.0
 				}
 			} else {
 				// Stereo interleaved: L R L R ...
-				dataSlice := (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[:nbSamples*4:nbSamples*4]
+				dataSlice := (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[: nbSamples*4 : nbSamples*4]
 				for i := 0; i < nbSamples; i++ {
 					leftVal := int16(dataSlice[i*4]) | int16(dataSlice[i*4+1])<<8
 					rightVal := int16(dataSlice[i*4+2]) | int16(dataSlice[i*4+3])<<8
@@ -348,7 +348,7 @@ func (d *FFmpegDecoder) extractSamples() ([]float64, error) {
 
 		case 2: // AVSampleFmtS32 - interleaved 32-bit signed (FLAC)
 			if channels == 1 {
-				dataSlice := (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[:nbSamples*4:nbSamples*4]
+				dataSlice := (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[: nbSamples*4 : nbSamples*4]
 				for i := 0; i < nbSamples; i++ {
 					val := int32(dataSlice[i*4]) |
 						int32(dataSlice[i*4+1])<<8 |
@@ -358,7 +358,7 @@ func (d *FFmpegDecoder) extractSamples() ([]float64, error) {
 				}
 			} else {
 				// Stereo interleaved
-				dataSlice := (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[:nbSamples*8:nbSamples*8]
+				dataSlice := (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[: nbSamples*8 : nbSamples*8]
 				for i := 0; i < nbSamples; i++ {
 					leftVal := int32(dataSlice[i*8]) |
 						int32(dataSlice[i*8+1])<<8 |
@@ -374,7 +374,7 @@ func (d *FFmpegDecoder) extractSamples() ([]float64, error) {
 
 		case 3: // AVSampleFmtFlt - interleaved float
 			if channels == 1 {
-				dataSlice := (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[:nbSamples*4:nbSamples*4]
+				dataSlice := (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[: nbSamples*4 : nbSamples*4]
 				for i := 0; i < nbSamples; i++ {
 					bits := uint32(dataSlice[i*4]) |
 						uint32(dataSlice[i*4+1])<<8 |
@@ -384,7 +384,7 @@ func (d *FFmpegDecoder) extractSamples() ([]float64, error) {
 				}
 			} else {
 				// Stereo interleaved
-				dataSlice := (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[:nbSamples*8:nbSamples*8]
+				dataSlice := (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[: nbSamples*8 : nbSamples*8]
 				for i := 0; i < nbSamples; i++ {
 					leftBits := uint32(dataSlice[i*8]) |
 						uint32(dataSlice[i*8+1])<<8 |
