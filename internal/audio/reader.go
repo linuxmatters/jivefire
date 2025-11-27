@@ -2,8 +2,6 @@ package audio
 
 import (
 	"fmt"
-	"path/filepath"
-	"strings"
 )
 
 // StreamingReader provides chunk-based audio reading for multiple formats
@@ -13,39 +11,12 @@ type StreamingReader struct {
 
 // NewStreamingReader creates a streaming audio reader for the given file.
 // Uses FFmpeg decoder for broad format support (MP3, FLAC, WAV, OGG, AAC, etc.)
-// Falls back to pure Go decoders if FFmpeg fails (shouldn't happen normally).
 func NewStreamingReader(filename string) (*StreamingReader, error) {
-	// Try FFmpeg decoder first - supports all common audio formats
 	decoder, err := NewFFmpegDecoder(filename)
-	if err == nil {
-		return &StreamingReader{decoder: decoder}, nil
+	if err != nil {
+		return nil, fmt.Errorf("failed to open audio file: %w", err)
 	}
-
-	// Fallback to pure Go decoders for specific formats
-	ext := strings.ToLower(filepath.Ext(filename))
-
-	switch ext {
-	case ".wav":
-		decoder, err := NewWAVDecoder(filename)
-		if err != nil {
-			return nil, err
-		}
-		return &StreamingReader{decoder: decoder}, nil
-	case ".mp3":
-		decoder, err := NewMP3Decoder(filename)
-		if err != nil {
-			return nil, err
-		}
-		return &StreamingReader{decoder: decoder}, nil
-	case ".flac":
-		decoder, err := NewFLACDecoder(filename)
-		if err != nil {
-			return nil, err
-		}
-		return &StreamingReader{decoder: decoder}, nil
-	default:
-		return nil, fmt.Errorf("unsupported audio format: %s (FFmpeg error: %v)", ext, err)
-	}
+	return &StreamingReader{decoder: decoder}, nil
 }
 
 // ReadChunk reads next chunk of samples, returns nil when EOF
