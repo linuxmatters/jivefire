@@ -132,10 +132,12 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 	overallStartTime := time.Now()
 
 	thumbnailPath := strings.Replace(outputFile, ".mp4", ".png", 1)
+	thumbnailStartTime := time.Now()
 	if err := renderer.GenerateThumbnail(thumbnailPath, CLI.Title, runtimeConfig); err != nil {
 		cli.PrintError(fmt.Sprintf("failed to generate thumbnail: %v", err))
 		os.Exit(1)
 	}
+	thumbnailDuration := time.Since(thumbnailStartTime)
 
 	// Create Bubbletea program for Pass 1
 	model := ui.NewPass1Model()
@@ -567,6 +569,7 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 			EncodeTime:       totalWrite,
 			TotalTime:        overallTotalTime, // Use overall total, not just Pass 2
 			Pass1Time:        pass1Duration,
+			ThumbnailTime:    thumbnailDuration,
 			SamplesProcessed: samplesProcessed,
 		})
 	}()
