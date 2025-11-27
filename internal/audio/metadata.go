@@ -3,7 +3,7 @@ package audio
 import (
 	"fmt"
 
-	ffmpeg "github.com/csnewman/ffmpeg-go"
+	ffmpeg "github.com/linuxmatters/ffmpeg-statigo"
 )
 
 // AudioMetadata holds information about an audio file
@@ -57,7 +57,7 @@ func GetAudioMetadata(filename string) (*AudioMetadata, error) {
 
 	// Extract metadata
 	sampleRate := int(codecpar.SampleRate())
-	channels := int(codecpar.Channels())
+	channels := codecpar.ChLayout().NbChannels()
 
 	// Calculate duration and total samples
 	// Duration is in stream time_base units

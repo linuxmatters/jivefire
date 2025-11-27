@@ -1,6 +1,6 @@
 # Jivefire Architecture
 
-**TL;DR:** 2-pass streaming audio visualiser that generates broadcast-ready MP4s from podcast audio. Pure Go audio decoding + ffmpeg-go static linking = single deployable binary.
+**TL;DR:** 2-pass streaming audio visualiser that generates broadcast-ready MP4s from podcast audio. Pure Go audio decoding + ffmpeg-statigo static linking = single deployable binary.
 
 ---
 
@@ -15,9 +15,9 @@ FFmpeg's audio visualisation filters (`showfreqs`, `showspectrum`) render contin
 ## Core Design Principles
 
 ### 1. **Single Binary Distribution**
-Uses [ffmpeg-go](https://github.com/csnewman/ffmpeg-go) with embedded static FFmpeg 6.1 libraries (50-65MB per platform). No external FFmpeg installation required. Ships for Linux/macOS on amd64/arm64.
+Uses [ffmpeg-statigo](https://github.com/linuxmatters/ffmpeg-statigo) with embedded static FFmpeg 8.0 libraries (~100MB per platform). No external FFmpeg installation required. Ships for Linux/macOS on amd64/arm64. Hardware acceleration support for NVENC, QuickSync, VideoToolbox, and Vulkan Video.
 
-**Why ffmpeg-go specifically?** Pre-built static libraries with GPL-licensed FFmpeg that includes H.264 (libx264) and AAC encoders. Produces YouTube-compatible MP4s out of the box.
+**Why ffmpeg-statigo specifically?** Pre-built static libraries with GPL-licensed FFmpeg that includes H.264 (libx264), H.265 (x265), AV1 (rav1e/dav1d), and AAC encoders. Produces YouTube-compatible MP4s out of the box.
 
 ### 2. **2-Pass Streaming Architecture**
 Memory-efficient approach: analyse first, render second.
@@ -64,15 +64,15 @@ Frame Renderer (image/draw + custom optimizations)
     └─ RGB24 pixel buffer (1280×720)
     ↓
 RGB → YUV420P Conversion (Pure Go, parallelised)
-    ├─ No swresample (not in ffmpeg-go)
+    ├─ No swresample (not in ffmpeg-statigo)
     ├─ Parallel row processing
     └─ Standard ITU-R BT.601 coefficients
     ↓
-ffmpeg-go H.264 Encoder (libx264)
+ffmpeg-statigo H.264 Encoder (libx264)
     ├─ 30fps video stream
     └─ yuv420p pixel format
     ↓
-ffmpeg-go AAC Encoder
+ffmpeg-statigo AAC Encoder
     ├─ Audio FIFO buffer (2048→1024 frame size mismatch)
     ├─ int16/float32 → float32 planar conversion
     └─ Mono→stereo duplication
@@ -124,7 +124,7 @@ internal/
   ├─ decoder.go        # AudioDecoder interface
   └─ reader.go         # Streaming reader with format detection
 
-  encoder/             # ffmpeg-go wrapper
+  encoder/             # ffmpeg-statigo wrapper
   ├─ encoder.go        # H.264 + AAC encoding, FIFO buffer
   └─ frame.go          # RGB→YUV conversion (parallelised)
 
@@ -146,7 +146,7 @@ internal/
 
 **Streaming Everything:** No large memory allocations. Audio chunks flow through FFT → rendering → encoding without buffering.
 
-**Static Linking:** ffmpeg-go's pre-built libraries eliminate "works on my machine" FFmpeg version chaos. One binary, guaranteed codec support.
+**Static Linking:** ffmpeg-statigo's pre-built libraries eliminate "works on my machine" FFmpeg version chaos. One binary, guaranteed codec support.
 
 **Performance Where It Matters:** The RGB→YUV conversion and frame rendering optimisations target the actual bottlenecks (measured via profiling), not premature guesses.
 
@@ -164,7 +164,7 @@ FFT bar binning logic mirrors CAVA's approach, making it familiar territory for 
 
 This a Jivefire, a Go project, that encodes podcast audio file to MP4 videos suitable for uploading to YouTube.
 
-Orientate yourself with the project by reading the documentation (README.md and docs/ARCHITECTURE.md) and analysing the code. You should refer to the ffmpeg-go source code when required, it can usually be found in `/tmp/ffmpeg-go-research`, but if it is not there you can use `gh` to clone it from https://github.com/csnewman/ffmpeg-go
+Orientate yourself with the project by reading the documentation (README.md and docs/ARCHITECTURE.md) and analysing the code. This project uses `ffmpeg-statigo` for FFmpeg 8.0 static bindings, included as a git submodule in `vendor/ffmpeg-statigo`.
 
 Sample audio file is in `testdata/`. You should only build and test via `just` commands. We are using NixOS as the host operating system and `flake.nix` provides tooling for the development shell. I use the `fish` shell. If you need to create "throw-away" test code, the put it in `testdata/`.
 

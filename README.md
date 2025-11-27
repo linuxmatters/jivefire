@@ -43,12 +43,17 @@ Your podcast audio deserves more than a static image on YouTube. Jivefire transf
 
 ## Build
 
-```bash
-just build      # Build binary
-just test-mp3   # Render test audio
+Jivefire uses [ffmpeg-statigo](https://github.com/linuxmatters/ffmpeg-statigo) for FFmpeg 8.0 static bindings.
 
-# Manual
-go build -o jivefire ./cmd/jivefire
+```bash
+# First time setup (download FFmpeg libraries)
+git submodule update --init --recursive
+just setup
+
+# Build and test
+just build      # Build binary
+just test       # Run tests
+just test-mp3   # Render test audio
 ```
 
 ## Architecture
