@@ -203,14 +203,14 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 	}
 	defer reader.Close()
 
-	// Initialize encoder with both video and audio
+	// Initialize encoder with video and audio (using new sample-based API)
 	enc, err := encoder.New(encoder.Config{
 		OutputPath:    outputFile,
 		Width:         config.Width,
 		Height:        config.Height,
 		Framerate:     config.FPS,
-		AudioPath:     inputFile, // Enable Phase 2B audio processing
-		AudioChannels: channels,  // Mono (1) or stereo (2)
+		SampleRate:    reader.SampleRate(), // Use sample rate from audio file
+		AudioChannels: channels,             // Mono (1) or stereo (2)
 	})
 	if err != nil {
 		cli.PrintError(fmt.Sprintf("creating encoder: %v", err))
@@ -314,6 +314,18 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 
 		copy(fftBuffer, initialSamples)
 
+		// Write initial audio samples to encoder (first samplesPerFrame worth)
+		// This corresponds to the audio for frame 0
+		initialAudioSamples := make([]float32, samplesPerFrame)
+		for i := 0; i < samplesPerFrame && i < len(initialSamples); i++ {
+			initialAudioSamples[i] = float32(initialSamples[i])
+		}
+		if err := enc.WriteAudioSamples(initialAudioSamples); err != nil {
+			encodingErr = fmt.Errorf("error writing initial audio: %w", err)
+			p2.Quit()
+			return
+		}
+
 		// Process frames until we run out of audio
 		frameNum := 0
 		for frameNum < numFrames {
@@ -414,15 +426,6 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 			}
 			totalWrite += time.Since(t0)
 
-			// Process audio up to this video frame's timestamp (interleaved encoding)
-			// This eliminates the 99% stall by muxing audio alongside video
-			videoPTS := int64(frameNum)
-			if err := enc.ProcessAudioUpToVideoPTS(videoPTS); err != nil {
-				encodingErr = fmt.Errorf("error processing audio at frame %d: %w", frameNum, err)
-				p2.Quit()
-				return
-			}
-
 			// Send progress update every 3 frames
 			// Send frame data for preview every 6 frames (5Hz at 30fps - good balance)
 			// Skip frame data entirely if preview is disabled for better batch performance
@@ -488,6 +491,18 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 				break
 			}
 
+			// Write audio samples for this frame to encoder
+			// Convert float64 samples to float32 for AAC encoder
+			audioSamples := make([]float32, len(newSamples))
+			for i, s := range newSamples {
+				audioSamples[i] = float32(s)
+			}
+			if err := enc.WriteAudioSamples(audioSamples); err != nil {
+				encodingErr = fmt.Errorf("error writing audio at frame %d: %w", frameNum, err)
+				p2.Quit()
+				return
+			}
+
 			// Shift buffer left by samplesPerFrame, append new samples
 			copy(fftBuffer, fftBuffer[samplesPerFrame:])
 			// Pad with zeros if we got fewer samples than expected
@@ -503,17 +518,9 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 		}
 
 		// Flush any remaining audio after all video frames are written
-		// Audio has been incrementally processed during the frame loop,
-		// but there may be some remaining at the end
+		// This encodes any samples remaining in the FIFO and flushes the encoder
 		audioFlushStart := time.Now()
-		audioFlushCallback := func(packetsProcessed int, elapsed time.Duration) {
-			// Send audio flush progress to UI
-			p2.Send(ui.Pass2AudioFlush{
-				PacketsProcessed: packetsProcessed,
-				Elapsed:          elapsed,
-			})
-		}
-		if err := enc.FlushRemainingAudio(audioFlushCallback); err != nil {
+		if err := enc.FlushAudioEncoder(); err != nil {
 			encodingErr = fmt.Errorf("error flushing audio: %w", err)
 			p2.Quit()
 			return
