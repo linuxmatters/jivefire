@@ -51,16 +51,16 @@ jobs:
 
       - name: Download ffmpeg-statigo libraries
         run: |
-          cd vendor/ffmpeg-statigo
+          cd third_party/ffmpeg-statigo
           go run ./cmd/download-lib
 
       - name: Run tests
-        run: go test -mod=mod -v ./...
+        run: go test -v ./...
 
       - name: Build ${{ matrix.os }} ${{ matrix.arch }}
         run: |
           echo "Building for ${{ matrix.os }}/${{ matrix.arch }}..."
-          go build -mod=mod -v -o jivefire-${{ matrix.os }}-${{ matrix.arch }} ./cmd/jivefire
+          go build -v -o jivefire-${{ matrix.os }}-${{ matrix.arch }} ./cmd/jivefire
           ls -lh jivefire-${{ matrix.os }}-${{ matrix.arch }}
 
       - name: Upload artifact

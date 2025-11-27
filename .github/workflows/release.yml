@@ -107,7 +107,7 @@ jobs:
 
       - name: Download ffmpeg-statigo libraries
         run: |
-          cd vendor/ffmpeg-statigo
+          cd third_party/ffmpeg-statigo
           go run ./cmd/download-lib
 
       - name: Get version from tag
@@ -118,7 +118,7 @@ jobs:
         run: |
           VERSION=${{ steps.get_version.outputs.version }}
           echo "Building jivefire $VERSION for ${{ matrix.os }}/${{ matrix.arch }}"
-          go build -mod=mod -ldflags="-X main.version=$VERSION" -o jivefire-${{ matrix.os }}-${{ matrix.arch }} ./cmd/jivefire
+          go build -ldflags="-X main.version=$VERSION" -o jivefire-${{ matrix.os }}-${{ matrix.arch }} ./cmd/jivefire
           ls -lh jivefire-${{ matrix.os }}-${{ matrix.arch }}
 
       - name: Upload Assets to Release
