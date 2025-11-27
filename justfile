@@ -11,17 +11,17 @@ setup:
     echo "Initialising ffmpeg-statigo submodule..."
     git submodule update --init --recursive
     echo "Downloading ffmpeg-statigo libraries..."
-    cd vendor/ffmpeg-statigo && go run ./cmd/download-lib
+    cd third_party/ffmpeg-statigo && go run ./cmd/download-lib
     echo "Setup complete!"
 
 # Update ffmpeg-statigo submodule
 update-ffmpeg:
     #!/usr/bin/env bash
     echo "Updating ffmpeg-statigo submodule..."
-    cd vendor/ffmpeg-statigo
+    cd third_party/ffmpeg-statigo
     git pull origin main
     cd ../..
-    git add vendor/ffmpeg-statigo
+    git add third_party/ffmpeg-statigo
     echo "Submodule updated"
     just setup
     echo "Don't forget to commit: git commit -m 'chore: update ffmpeg-statigo submodule'"
@@ -31,7 +31,7 @@ build:
     #!/usr/bin/env bash
     VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
     echo "Building jivefire version: $VERSION"
-    CGO_ENABLED=1 go build -mod=mod -ldflags="-X main.version=$VERSION" -o jivefire ./cmd/jivefire
+    CGO_ENABLED=1 go build -ldflags="-X main.version=$VERSION" -o jivefire ./cmd/jivefire
 
 # Install the jivefire binary to ~/.local/bin
 install: build
@@ -50,11 +50,11 @@ clean:
 
 # Benchmark RGB→YUV colourspace conversion (Go vs FFmpeg swscale)
 bench-yuv:
-    @go test -mod=mod -v ./internal/encoder/ -run=TestBenchmarkSummary
+    @go test -v ./internal/encoder/ -run=TestBenchmarkSummary
 
 # Full benchmark with iterations (for detailed profiling)
 bench-yuv-full:
-    go test -mod=mod -bench=. -benchmem ./internal/encoder/ -run='^$$'
+    go test -bench=. -benchmem ./internal/encoder/ -run='^$$'
 
 # Make a VHS tape recording
 vhs: build
@@ -104,4 +104,4 @@ test-preview: build
 
 # Run tests
 test:
-    go test -mod=mod ./...
+    go test ./...

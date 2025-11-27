@@ -42,4 +42,4 @@ require (
 	golang.org/x/text v0.31.0 // indirect
 )
 
-replace github.com/linuxmatters/ffmpeg-statigo => ./vendor/ffmpeg-statigo
+replace github.com/linuxmatters/ffmpeg-statigo => ./third_party/ffmpeg-statigo
