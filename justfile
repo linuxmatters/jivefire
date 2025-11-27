@@ -48,6 +48,14 @@ clean:
     @rm testdata/*.wav 2>/dev/null || true
     @rm testdata/*-stereo.mp3 2>/dev/null || true
 
+# Benchmark RGB→YUV colourspace conversion (Go vs FFmpeg swscale)
+bench-yuv:
+    @go test -mod=mod -v ./internal/encoder/ -run=TestBenchmarkSummary
+
+# Full benchmark with iterations (for detailed profiling)
+bench-yuv-full:
+    go test -mod=mod -bench=. -benchmem ./internal/encoder/ -run='^$$'
+
 # Make a VHS tape recording
 vhs: build
     @vhs ./jivefire.tape
