@@ -5,12 +5,26 @@
 default:
     @just --list
 
-# Download ffmpeg-statigo libraries (run after clone/submodule init)
+# Download ffmpeg-statigo libraries
 setup:
     #!/usr/bin/env bash
+    echo "Initialising ffmpeg-statigo submodule..."
+    git submodule update --init --recursive
     echo "Downloading ffmpeg-statigo libraries..."
     cd vendor/ffmpeg-statigo && go run ./cmd/download-lib
     echo "Setup complete!"
+
+# Update ffmpeg-statigo submodule
+update-ffmpeg:
+    #!/usr/bin/env bash
+    echo "Updating ffmpeg-statigo submodule..."
+    cd vendor/ffmpeg-statigo
+    git pull origin main
+    cd ../..
+    git add vendor/ffmpeg-statigo
+    echo "Submodule updated"
+    just setup
+    echo "Don't forget to commit: git commit -m 'chore: update ffmpeg-statigo submodule'"
 
 # Build the jivefire binary (dev version)
 build:
@@ -83,7 +97,3 @@ test-preview: build
 # Run tests
 test:
     go test -mod=mod ./...
-
-# Get project orientation info
-onboard:
-  @tail -n 9 docs/ARCHITECTURE.md
