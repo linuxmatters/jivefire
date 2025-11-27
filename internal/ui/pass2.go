@@ -41,7 +41,8 @@ type Pass2Complete struct {
 	DrawTime         time.Duration
 	EncodeTime       time.Duration
 	TotalTime        time.Duration
-	Pass1Time        time.Duration // Time spent in Pass 1 analysis
+	Pass1Time        time.Duration     // Time spent in Pass 1 analysis
+	ThumbnailTime    time.Duration     // Time spent generating thumbnail
 	SamplesProcessed int64
 }
 
@@ -253,11 +254,12 @@ func (m *pass2Model) renderProgress() string {
 			estimatedTotal = time.Duration(float64(elapsed) / overallPercent)
 			eta = estimatedTotal - elapsed
 
-			// Calculate speed as ratio of video duration to encoding time
+			// Calculate speed as ratio of video duration encoded so far to elapsed time
+			// This gives an accurate realtime multiplier that increases from 0 as we encode
 			// Assuming 30 fps
-			videoDuration := time.Duration(m.lastUpdate.TotalFrames) * time.Second / 30
+			videoEncodedSoFar := time.Duration(m.lastUpdate.Frame) * time.Second / 30
 			if elapsed > 0 {
-				speed = float64(videoDuration) / float64(elapsed)
+				speed = float64(videoEncodedSoFar) / float64(elapsed)
 			}
 		}
 
@@ -356,14 +358,12 @@ func (m *pass2Model) renderComplete() string {
 	// Output summary
 	s.WriteString(fmt.Sprintf("Output:   %s\n", m.complete.OutputFile))
 
-	// Calculate speed using total time (not just Pass 2)
+	// Calculate video duration for display
 	videoDuration := time.Duration(m.complete.TotalFrames) * time.Second / 30
-	speed := float64(videoDuration) / float64(m.complete.TotalTime)
 
-	s.WriteString(fmt.Sprintf("Duration: %.1fs video in %.1fs (%.1fx realtime)\n",
+	s.WriteString(fmt.Sprintf("Duration: %.1fs video in %.1fs\n",
 		videoDuration.Seconds(),
-		m.complete.TotalTime.Seconds(),
-		speed))
+		m.complete.TotalTime.Seconds()))
 
 	s.WriteString(fmt.Sprintf("Size:     %s\n\n", formatBytes(m.complete.FileSize)))
 
@@ -374,6 +374,15 @@ func (m *pass2Model) renderComplete() string {
 	totalMs := m.complete.TotalTime.Milliseconds()
 	if totalMs == 0 {
 		totalMs = 1 // Avoid division by zero
+	}
+
+	// Thumbnail generation
+	if m.complete.ThumbnailTime > 0 {
+		s.WriteString(fmt.Sprintf("  %-20s%-5s  (%2d%%)  %s\n",
+			"Thumbnail:",
+			formatDuration(m.complete.ThumbnailTime),
+			int(float64(m.complete.ThumbnailTime.Milliseconds())*100/float64(totalMs)),
+			makeSparkline(float64(m.complete.ThumbnailTime.Milliseconds())/float64(totalMs), 30)))
 	}
 
 	// Pass 1 Analysis
@@ -411,12 +420,12 @@ func (m *pass2Model) renderComplete() string {
 		makeSparkline(float64(m.complete.EncodeTime.Milliseconds())/float64(totalMs), 30)))
 
 	// Calculate and display "other" time (overhead, I/O, etc.)
-	accountedTime := m.complete.Pass1Time + m.complete.FFTTime + m.complete.BinTime +
+	accountedTime := m.complete.ThumbnailTime + m.complete.Pass1Time + m.complete.FFTTime + m.complete.BinTime +
 		m.complete.DrawTime + m.complete.EncodeTime
 	otherTime := m.complete.TotalTime - accountedTime
 	if otherTime > 0 {
 		s.WriteString(fmt.Sprintf("  %-20s%-5s  (%2d%%)  %s\n",
-			"Initialization:",
+			"Other:",
 			formatDuration(otherTime),
 			int(float64(otherTime.Milliseconds())*100/float64(totalMs)),
 			makeSparkline(float64(otherTime.Milliseconds())/float64(totalMs), 30)))

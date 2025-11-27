@@ -49,8 +49,8 @@ type pass1Model struct {
 func NewPass1Model() tea.Model {
 	return &pass1Model{
 		startTime:       time.Now(),
-		minDisplayTime:  500 * time.Millisecond,
-		completionDelay: 250 * time.Millisecond,
+		minDisplayTime:  0,
+		completionDelay: 0,
 		quitting:        false,
 	}
 }
