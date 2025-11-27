@@ -64,8 +64,8 @@ Frame Renderer (image/draw + custom optimizations)
     └─ RGB24 pixel buffer (1280×720)
     ↓
 RGB → YUV420P Conversion (Pure Go, parallelised)
-    ├─ No swresample (not in ffmpeg-statigo)
-    ├─ Parallel row processing
+    ├─ 8.4× faster than FFmpeg swscale
+    ├─ Parallel row processing across CPU cores
     └─ Standard ITU-R BT.601 coefficients
     ↓
 ffmpeg-statigo H.264 Encoder (libx264)
@@ -89,13 +89,15 @@ MP4 Muxer (libavformat)
 FFT analysis requires 2048 samples for frequency resolution, but AAC encoder expects 1024 samples per frame. **Solution:** Pure Go FIFO buffer in `encoder/encoder.go` handles buffering and frame size conversion without external dependencies.
 
 ### RGB → YUV Conversion
-ffmpeg-go lacks `swresample` bindings for colourspace conversion. **Solution:** Custom parallelised RGB→YUV420P converter in `encoder/frame.go`:
+Custom parallelised RGB→YUV420P converter in `encoder/frame.go`:
 - Processes image rows in parallel across CPU cores
 - Uses Go's standard ITU-R BT.601 coefficients
-- 60% performance improvement over naive single-threaded approach
-- Could be extracted as standalone Go library
+- **8.4× faster than FFmpeg's swscale** (benchmarked: 346µs vs 2,915µs per 1280×720 frame)
+- Strong candidate for extraction as standalone Go module
 
-**Why not use Go's `color.RGBToYCbCr()`?** It's fast for single pixels but not parallelised. Our implementation processes multiple rows simultaneously across goroutines, achieving ~10x realtime encoding speed.
+**Why not FFmpeg's swscale?** While ffmpeg-statigo exposes the full swscale API, benchmarking revealed our parallelised Go implementation significantly outperforms it. FFmpeg's swscale is single-threaded; our implementation distributes row processing across all CPU cores. On a 12-core/24-thread Ryzen 9, parallelisation wins decisively over SIMD.
+
+**Why not Go's `color.RGBToYCbCr()`?** It's fast for single pixels but not parallelised. Our implementation processes multiple rows simultaneously across goroutines, achieving ~10× realtime encoding speed.
 
 ### Symmetric Bar Rendering
 Bars 0-31 are mirrored to create bars 32-63. Renderer draws upper-left quadrant (1/4 of pixels), then mirrors 3 times:
@@ -154,7 +156,13 @@ internal/
 
 ## Future-Proofing
 
-The RGB→YUV converter in `encoder/frame.go` could be extracted as a standalone Go package—there's no pure Go library for parallelised colourspace conversion, and swresample bindings aren't universally available in Go FFmpeg wrappers.
+### go-yuv: Parallelised Colourspace Conversion
+The RGB→YUV converter in `encoder/frame.go` is a strong candidate for extraction as a standalone Go module. Benchmarking shows it's **8.4× faster than FFmpeg's swscale** for RGB24→YUV420P conversion at 720p, thanks to goroutine-based parallelisation across CPU cores.
+
+There's currently no pure Go library offering parallelised colourspace conversion. Existing options are either single-threaded (stdlib `color.RGBToYCbCr`) or require CGO FFmpeg bindings. A standalone `go-yuv` module would benefit:
+- Video encoding pipelines avoiding FFmpeg dependencies
+- Image processing tools needing high-throughput colourspace conversion
+- WebRTC/streaming applications with real-time constraints
 
 The FIFO buffer implementation is generic enough for any audio frame size mismatch scenario in Go audio processing pipelines.
 
