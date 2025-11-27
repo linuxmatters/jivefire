@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/linuxmatters/jivefire/internal/config"
 )
 
 // TestGenerateSampleThumbnail generates a sample thumbnail for development/testing
@@ -28,13 +30,16 @@ func TestGenerateSampleThumbnail(t *testing.T) {
 		},
 	}
 
+	// Use default config (nil runtimeConfig uses defaults)
+	runtimeConfig := &config.RuntimeConfig{}
+
 	for _, tc := range testCases {
 		t.Run(tc.title, func(t *testing.T) {
 			// Create output in testdata directory
 			outputPath := filepath.Join("../../testdata", tc.outputName)
 
 			// Generate thumbnail
-			err := GenerateThumbnail(outputPath, tc.title)
+			err := GenerateThumbnail(outputPath, tc.title, runtimeConfig)
 			if err != nil {
 				t.Fatalf("failed to generate thumbnail: %v", err)
 			}

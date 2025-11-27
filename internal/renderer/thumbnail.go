@@ -19,16 +19,17 @@ import (
 	"golang.org/x/image/math/fixed"
 )
 
-// getThumbnailTextColor returns the brand yellow color for thumbnail text
-func getThumbnailTextColor() color.RGBA {
-	return color.RGBA{R: config.TextColorR, G: config.TextColorG, B: config.TextColorB, A: 255}
+// getThumbnailTextColor returns the text color for thumbnail (uses runtime config or default)
+func getThumbnailTextColor(runtimeConfig *config.RuntimeConfig) color.RGBA {
+	r, g, b := runtimeConfig.GetTextColor()
+	return color.RGBA{R: r, G: g, B: b, A: 255}
 }
 
 // GenerateThumbnail creates a YouTube thumbnail with the title text overlaid
 // The thumbnail is the same resolution as the video (1280x720)
-func GenerateThumbnail(outputPath string, title string) error {
+func GenerateThumbnail(outputPath string, title string, runtimeConfig *config.RuntimeConfig) error {
 	// Load the thumbnail background image
-	thumbImg, err := loadThumbnailBackground()
+	thumbImg, err := loadThumbnailBackground(runtimeConfig)
 	if err != nil {
 		return fmt.Errorf("failed to load thumbnail background: %w", err)
 	}
@@ -58,7 +59,7 @@ func GenerateThumbnail(outputPath string, title string) error {
 	defer face.Close()
 
 	// Draw the text on the thumbnail
-	drawThumbnailText(thumbImg, face, line1, line2)
+	drawThumbnailText(thumbImg, face, line1, line2, runtimeConfig)
 
 	// Save the thumbnail
 	if err := saveThumbnail(thumbImg, outputPath); err != nil {
@@ -68,9 +69,22 @@ func GenerateThumbnail(outputPath string, title string) error {
 	return nil
 }
 
-// loadThumbnailBackground loads and scales the embedded thumbnail background
-func loadThumbnailBackground() (*image.RGBA, error) {
-	data, err := embeddedAssets.ReadFile(config.ThumbnailImageAsset)
+// loadThumbnailBackground loads and scales the thumbnail background (from custom path or embedded asset)
+func loadThumbnailBackground(runtimeConfig *config.RuntimeConfig) (*image.RGBA, error) {
+	imagePath := runtimeConfig.GetThumbnailImagePath()
+
+	var data []byte
+	var err error
+
+	// Check if using custom image path or embedded asset
+	if runtimeConfig.ThumbnailImagePath != "" {
+		// Load from filesystem
+		data, err = os.ReadFile(imagePath)
+	} else {
+		// Load from embedded assets
+		data, err = embeddedAssets.ReadFile(imagePath)
+	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +190,7 @@ func measureText(face font.Face, text string) (int, fixed.Rectangle26_6) {
 // Line 1 is top-aligned at the ThumbnailMargin
 // Bottom edge of line 2 must not extend below center line
 // Text is rotated ThumbnailTextRotationDegrees clockwise for dynamic effect
-func drawThumbnailText(img *image.RGBA, face font.Face, line1, line2 string) {
+func drawThumbnailText(img *image.RGBA, face font.Face, line1, line2 string, runtimeConfig *config.RuntimeConfig) {
 	// Measure text dimensions - bounds.Min.Y is negative (ascent), bounds.Max.Y is positive (descent)
 	width1, bounds1 := measureText(face, line1)
 	width2, bounds2 := measureText(face, line2)
@@ -217,8 +231,8 @@ func drawThumbnailText(img *image.RGBA, face font.Face, line1, line2 string) {
 	line2VisualTop := line1VisualTop + height1 + lineSpacing
 	line2BaselineY := line2VisualTop - bounds2.Min.Y.Ceil()
 
-	drawCenteredLineOnTemp(tempImg, face, line1, tempSize, line1BaselineY)
-	drawCenteredLineOnTemp(tempImg, face, line2, tempSize, line2BaselineY)
+	drawCenteredLineOnTemp(tempImg, face, line1, tempSize, line1BaselineY, runtimeConfig)
+	drawCenteredLineOnTemp(tempImg, face, line2, tempSize, line2BaselineY, runtimeConfig)
 
 	// Create rotation matrix for thumbnail text rotation (clockwise)
 	angle := -config.ThumbnailTextRotationDegrees * math.Pi / 180.0 // Negative for clockwise
@@ -278,14 +292,14 @@ func drawThumbnailText(img *image.RGBA, face font.Face, line1, line2 string) {
 }
 
 // drawCenteredLineOnTemp draws a line of text centered on a temporary image
-func drawCenteredLineOnTemp(img *image.RGBA, face font.Face, text string, imgWidth, baselineY int) {
+func drawCenteredLineOnTemp(img *image.RGBA, face font.Face, text string, imgWidth, baselineY int, runtimeConfig *config.RuntimeConfig) {
 	if text == "" {
 		return
 	}
 
 	d := &font.Drawer{
 		Dst:  img,
-		Src:  image.NewUniform(getThumbnailTextColor()),
+		Src:  image.NewUniform(getThumbnailTextColor(runtimeConfig)),
 		Face: face,
 	}
 

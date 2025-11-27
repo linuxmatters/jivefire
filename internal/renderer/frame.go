@@ -3,6 +3,7 @@ package renderer
 import (
 	"fmt"
 	"image"
+	"image/color"
 	"sync"
 
 	"github.com/linuxmatters/jivefire/internal/config"
@@ -21,6 +22,7 @@ type Frame struct {
 	// Text overlay
 	episodeNum string
 	title      string
+	textColor  color.RGBA // Text color for overlays
 
 	// Pre-computed values
 	maxBarHeight    int
@@ -37,13 +39,17 @@ var framePool = sync.Pool{
 }
 
 // NewFrame creates a new optimized frame renderer
-func NewFrame(bgImage *image.RGBA, fontFace font.Face, episodeNum int, title string) *Frame {
+func NewFrame(bgImage *image.RGBA, fontFace font.Face, episodeNum int, title string, runtimeConfig *config.RuntimeConfig) *Frame {
 	totalWidth := config.NumBars*config.BarWidth + (config.NumBars-1)*config.BarGap
 	startX := (config.Width - totalWidth) / 2
 	centerY := config.Height / 2
 
 	// Calculate maximum possible bar height
 	maxBarHeight := centerY - config.CenterGap/2
+
+	// Get colors from runtime config (uses override or default)
+	barR, barG, barB := runtimeConfig.GetBarColor()
+	textR, textG, textB := runtimeConfig.GetTextColor()
 
 	// Pre-compute intensity gradient table (0.5 to 1.0 range for opaque gradient)
 	// This creates a fade from dim at tips to bright at center without alpha blending
@@ -59,19 +65,19 @@ func NewFrame(bgImage *image.RGBA, fontFace font.Face, episodeNum int, title str
 	barColorTable := make([][3]uint8, 256)
 	for intensity := 0; intensity < 256; intensity++ {
 		factor := float64(intensity) / 255.0
-		barColorTable[intensity][0] = uint8(float64(config.BarColorR) * factor)
-		barColorTable[intensity][1] = uint8(float64(config.BarColorG) * factor)
-		barColorTable[intensity][2] = uint8(float64(config.BarColorB) * factor)
+		barColorTable[intensity][0] = uint8(float64(barR) * factor)
+		barColorTable[intensity][1] = uint8(float64(barG) * factor)
+		barColorTable[intensity][2] = uint8(float64(barB) * factor)
 	}
 
-	// Pre-render framing line pattern (brand yellow from config)
+	// Pre-render framing line pattern (text color from config)
 	framingLineData := make([]byte, totalWidth*4)
 	for px := 0; px < totalWidth; px++ {
 		offset := px * 4
-		framingLineData[offset] = config.TextColorR   // R
-		framingLineData[offset+1] = config.TextColorG // G
-		framingLineData[offset+2] = config.TextColorB // B
-		framingLineData[offset+3] = 255               // A
+		framingLineData[offset] = textR   // R
+		framingLineData[offset+1] = textG // G
+		framingLineData[offset+2] = textB // B
+		framingLineData[offset+3] = 255   // A
 	}
 
 	// Format episode number as two-digit string
@@ -89,6 +95,7 @@ func NewFrame(bgImage *image.RGBA, fontFace font.Face, episodeNum int, title str
 		totalWidth:      totalWidth,
 		episodeNum:      episodeStr,
 		title:           title,
+		textColor:       color.RGBA{R: textR, G: textG, B: textB, A: 255},
 		maxBarHeight:    maxBarHeight,
 		intensityTable:  intensityTable,
 		barColorTable:   barColorTable,
@@ -266,8 +273,8 @@ func (f *Frame) mirrorBarHorizontal(xLeft, xRight, yStart, yEnd int) {
 // applyTextOverlay renders text onto the frame
 func (f *Frame) applyTextOverlay() {
 	if f.fontFace != nil {
-		DrawCenterText(f.img, f.fontFace, f.title, f.centerY)
-		DrawEpisodeNumber(f.img, f.fontFace, f.episodeNum)
+		DrawCenterText(f.img, f.fontFace, f.title, f.centerY, f.textColor)
+		DrawEpisodeNumber(f.img, f.fontFace, f.episodeNum, f.textColor)
 	}
 }
 
