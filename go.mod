@@ -14,7 +14,7 @@ require (
 	github.com/hajimehoshi/go-mp3 v0.3.4
 	github.com/linuxmatters/ffmpeg-statigo v0.0.0-00010101000000-000000000000
 	github.com/mewkiz/flac v1.0.13
-	golang.org/x/image v0.32.0
+	golang.org/x/image v0.33.0
 )
 
 require (
