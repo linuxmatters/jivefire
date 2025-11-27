@@ -7,7 +7,7 @@ import (
 	"time"
 	"unsafe"
 
-	ffmpeg "github.com/csnewman/ffmpeg-go"
+	ffmpeg "github.com/linuxmatters/ffmpeg-statigo"
 )
 
 // Config holds the encoder configuration
@@ -305,7 +305,7 @@ func (e *Encoder) initializeAudio() error {
 
 	// Validate audio input format
 	sampleFmt := e.audioDecoder.SampleFmt()
-	channels := e.audioDecoder.Channels()
+	channels := e.audioDecoder.ChLayout().NbChannels()
 	sampleRate := e.audioDecoder.SampleRate()
 
 	// Log the decoder's output format (commented out to avoid TUI interference)
@@ -375,15 +375,11 @@ func (e *Encoder) initializeAudio() error {
 		outputChannels = 1 // Default to mono if not specified
 	}
 
-	// Using the older channel layout API
+	// Set channel layout using FFmpeg 8.0 API
 	if outputChannels == 1 {
-		// 4 = AV_CH_LAYOUT_MONO (single channel)
-		e.audioCodec.SetChannelLayout(4)
-		e.audioCodec.SetChannels(1)
+		ffmpeg.AVChannelLayoutDefault(e.audioCodec.ChLayout(), 1)
 	} else {
-		// 3 = AV_CH_LAYOUT_STEREO (left + right channels)
-		e.audioCodec.SetChannelLayout(3)
-		e.audioCodec.SetChannels(2)
+		ffmpeg.AVChannelLayoutDefault(e.audioCodec.ChLayout(), 2)
 	}
 
 	e.audioCodec.SetBitRate(192000) // 192 kbps
@@ -424,11 +420,9 @@ func (e *Encoder) initializeAudio() error {
 	e.audioEncFrame.SetNbSamples(e.audioCodec.FrameSize())
 	e.audioEncFrame.SetFormat(int(ffmpeg.AVSampleFmtFltp))
 	if outputChannels == 1 {
-		e.audioEncFrame.SetChannelLayout(4) // AV_CH_LAYOUT_MONO
-		e.audioEncFrame.SetChannels(1)
+		ffmpeg.AVChannelLayoutDefault(e.audioEncFrame.ChLayout(), 1)
 	} else {
-		e.audioEncFrame.SetChannelLayout(3) // AV_CH_LAYOUT_STEREO
-		e.audioEncFrame.SetChannels(2)
+		ffmpeg.AVChannelLayoutDefault(e.audioEncFrame.ChLayout(), 2)
 	}
 	e.audioEncFrame.SetSampleRate(e.audioCodec.SampleRate())
 
@@ -888,7 +882,7 @@ func (e *Encoder) ProcessAudioUpToVideoPTS(targetVideoPts int64) error {
 			}
 
 			// Extract float samples from decoded frame (with downmix if stereo)
-			channels := e.audioDecoder.Channels()
+			channels := e.audioDecoder.ChLayout().NbChannels()
 			monoSamples, err := extractFloatsWithDownmix(e.audioDecFrame, channels)
 			if err != nil {
 				ffmpeg.AVPacketUnref(e.audioPacket)
@@ -1055,7 +1049,7 @@ func (e *Encoder) FlushRemainingAudio(progressCallback AudioFlushCallback) error
 				return fmt.Errorf("failed to receive audio frame from decoder: %w", err)
 			}
 
-			channels := e.audioDecoder.Channels()
+			channels := e.audioDecoder.ChLayout().NbChannels()
 			monoSamples, err := extractFloatsWithDownmix(e.audioDecFrame, channels)
 			if err != nil {
 				ffmpeg.AVPacketUnref(e.audioPacket)
@@ -1124,7 +1118,7 @@ func (e *Encoder) FlushRemainingAudio(progressCallback AudioFlushCallback) error
 			break
 		}
 
-		channels := e.audioDecoder.Channels()
+		channels := e.audioDecoder.ChLayout().NbChannels()
 		monoSamples, _ := extractFloatsWithDownmix(e.audioDecFrame, channels)
 		var outputSamples []float32
 		if outputChannels == 2 {
@@ -1266,7 +1260,7 @@ func (e *Encoder) ProcessAudio() error {
 			}
 
 			// Extract float samples from decoded frame (with downmix if stereo)
-			channels := e.audioDecoder.Channels()
+			channels := e.audioDecoder.ChLayout().NbChannels()
 			monoSamples, err := extractFloatsWithDownmix(e.audioDecFrame, channels)
 			if err != nil {
 				ffmpeg.AVPacketUnref(e.audioPacket)
@@ -1368,7 +1362,7 @@ func (e *Encoder) ProcessAudio() error {
 		}
 
 		// Extract and process same as above
-		channels := e.audioDecoder.Channels()
+		channels := e.audioDecoder.ChLayout().NbChannels()
 		monoSamples, _ := extractFloatsWithDownmix(e.audioDecFrame, channels)
 		stereoSamples := monoToStereo(monoSamples)
 		e.audioFIFO.Push(stereoSamples)

@@ -1,0 +1,3 @@
+[submodule "vendor/ffmpeg-statigo"]
+	path = vendor/ffmpeg-statigo
+	url = https://github.com/linuxmatters/ffmpeg-statigo

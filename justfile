@@ -5,12 +5,19 @@
 default:
     @just --list
 
+# Download ffmpeg-statigo libraries (run after clone/submodule init)
+setup:
+    #!/usr/bin/env bash
+    echo "Downloading ffmpeg-statigo libraries..."
+    cd vendor/ffmpeg-statigo && go run ./cmd/download-lib
+    echo "Setup complete!"
+
 # Build the jivefire binary (dev version)
 build:
     #!/usr/bin/env bash
     VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
     echo "Building jivefire version: $VERSION"
-    CGO_ENABLED=1 go build -ldflags="-X main.version=$VERSION" -o jivefire ./cmd/jivefire
+    CGO_ENABLED=1 go build -mod=mod -ldflags="-X main.version=$VERSION" -o jivefire ./cmd/jivefire
 
 # Install the jivefire binary to ~/.local/bin
 install: build
@@ -64,6 +71,10 @@ test-wav: build
     ./jivefire --episode="01" --title "Linux Matters: wav (mono)" testdata/LMP0.wav testdata/LMP0-wav.mp4
     ./jivefire --episode="02" --title "Linux Matters: wav (stereo)" testdata/LMP0-stereo.wav testdata/LMP0-wav-stereo.mp4
 
+# Test partial episode 67 with FLAC input
+test-67: build
+    ./jivefire --episode="67" --title "Test Episode 67" testdata/LMP67.flac testdata/LMP67.mp4
+
 # Test preview performance comparison
 test-preview: build
     time ./jivefire --episode="0" --title "Test With Preview" testdata/LMP0.mp3 testdata/LMP0-mp3.mp4
@@ -71,7 +82,7 @@ test-preview: build
 
 # Run tests
 test:
-    go test ./...
+    go test -mod=mod ./...
 
 # Get project orientation info
 onboard:
