@@ -4,14 +4,6 @@
 
 ---
 
-## The Problem
-
-FFmpeg's audio visualisation filters (`showfreqs`, `showspectrum`) render continuous frequency spectra, not discrete bars. No amount of FFmpeg filter chain kung-fu can achieve the discrete 64-bar aesthetic required for Linux Matters branding. Solution: Do the FFT analysis and bar rendering in Go, pipe frames to FFmpeg for encoding.
-
-**Why Go over Python?** The original `djfun/audio-visualizer-python` tool is a moribund Qt5 GUI with significant debt. Modern podcast production needs a multi-archtitecture tools that's that can integrate into automation pipelines.
-
----
-
 ## Core Design Principles
 
 ### 1. **Single Binary Distribution**
@@ -93,7 +85,7 @@ MP4 Muxer (libavformat)
 ## Key Technical Choices
 
 ### Audio Frame Size Mismatch
-FFT analysis requires 2048 samples for frequency resolution, but AAC encoder expects 1024 samples per frame. **Solution:** Pure Go FIFO buffer in `encoder/encoder.go` handles buffering and frame size conversion without external dependencies.
+FFT analysis requires 2048 samples for frequency resolution, but AAC encoder expects 1024 samples per frame. **Solution:** `SharedAudioBuffer` in `audio/shared_buffer.go` provides thread-safe multi-consumer access with independent read positions—FFT and encoder each consume at their own rate without blocking each other.
 
 ### RGB → YUV Conversion
 Custom parallelised RGB→YUV420P converter in `encoder/frame.go`:
@@ -126,39 +118,13 @@ Preview renders via Unicode blocks (`▁▂▃▄▅▆▇█`) using actual bar
 ## File Structure
 
 ```
-cmd/jivefire/          # CLI entry point, 2-pass coordinator
-internal/
-  audio/               # Audio processing
-  ├─ ffmpeg_decoder.go # FFmpeg-based decoder (AudioDecoder interface)
-  ├─ analyzer.go       # FFT analysis, bar binning
-  ├─ decoder.go        # AudioDecoder interface definition
-  └─ reader.go         # Streaming reader wrapper
-
-  encoder/             # ffmpeg-statigo wrapper
-  ├─ encoder.go        # H.264 + AAC encoding, FIFO buffer
-  └─ frame.go          # RGB→YUV conversion (parallelised)
-
-  renderer/            # Frame generation
-  └─ frame.go          # Bar drawing, alpha tables, symmetry
-
-  ui/                  # Bubbletea models
-  ├─ pass1.go          # Analysis progress + live preview
-  └─ pass2.go          # Encoding progress + mini spectrum
-
-  config/              # Constants (dimensions, colours, FFT params)
+cmd/jivefire/main.go     → CLI entry, 2-pass coordinator
+internal/audio/          → FFmpegDecoder (AudioDecoder interface), FFT analysis
+internal/encoder/        → ffmpeg-statigo wrapper, RGB→YUV conversion, FIFO buffer
+internal/renderer/       → Frame generation, bar drawing, thumbnail
+internal/ui/             → Bubbletea TUI (pass1.go, pass2.go)
+internal/config/         → Constants (dimensions, FFT params, colours)
 ```
-
----
-
-## Why This Architecture Works
-
-**Single Responsibility:** Each component does one thing well. Audio decoding is separate from FFT analysis. Frame rendering doesn't know about encoding. Encoder handles video/audio coordination.
-
-**Streaming Everything:** No large memory allocations. Audio chunks flow through FFT → rendering → encoding without buffering.
-
-**Static Linking:** ffmpeg-statigo's pre-built libraries eliminate "works on my machine" FFmpeg version chaos. One binary, guaranteed codec support.
-
-**Performance Where It Matters:** The RGB→YUV conversion and frame rendering optimisations target the actual bottlenecks (measured via profiling), not premature guesses.
 
 ---
 
@@ -175,15 +141,3 @@ There's currently no pure Go library offering parallelised colourspace conversio
 The FIFO buffer implementation is generic enough for any audio frame size mismatch scenario in Go audio processing pipelines.
 
 FFT bar binning logic mirrors CAVA's approach, making it familiar territory for anyone who's worked with terminal audio visualisers.
-
-## Orientation
-
-This a Jivefire, a Go project, that encodes podcast audio file to MP4 videos suitable for uploading to YouTube.
-
-Orientate yourself with the project by reading the documentation (README.md and docs/ARCHITECTURE.md) and analysing the code. This project uses `ffmpeg-statigo` for FFmpeg 8.0 static bindings, included as a git submodule in `third_party/ffmpeg-statigo`.
-
-Sample audio file is in `testdata/`. You should only build and test via `just` commands. We are using NixOS as the host operating system and `flake.nix` provides tooling for the development shell. I use the `fish` shell. If you need to create "throw-away" test code, the put it in `testdata/`.
-
-Never claim your work is "Perfect", "Excellent" or "Production ready". I will judge the quality of the work we do. Never claim something is fixed, working or implemented until we have both confirmed so.
-
-Let me know when you are ready to start collaborating.

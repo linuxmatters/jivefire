@@ -5,9 +5,12 @@
 default:
     @just --list
 
-# Download ffmpeg-statigo libraries
+# Download ffmpeg-statigo libraries and configure git for submodules
 setup:
     #!/usr/bin/env bash
+    echo "Configuring git for submodule-friendly pulls..."
+    git config pull.ff only
+    git config submodule.recurse true
     echo "Initialising ffmpeg-statigo submodule..."
     git submodule update --init --recursive
     echo "Downloading ffmpeg-statigo libraries..."
