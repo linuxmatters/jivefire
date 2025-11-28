@@ -1,0 +1,714 @@
+package ui
+
+import (
+	"fmt"
+	"image"
+	"math"
+	"strings"
+	"time"
+
+	"github.com/charmbracelet/bubbles/progress"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+)
+
+// Phase represents the current processing phase
+type Phase int
+
+const (
+	PhaseAnalysis Phase = iota
+	PhaseRendering
+	PhaseComplete
+)
+
+// AnalysisProgress represents progress updates from Pass 1 audio analysis
+type AnalysisProgress struct {
+	Frame       int
+	TotalFrames int
+	CurrentRMS  float64
+	CurrentPeak float64
+	BarHeights  []float64
+	Duration    time.Duration
+}
+
+// AnalysisComplete signals completion of Pass 1 with audio profile data
+type AnalysisComplete struct {
+	PeakMagnitude float64
+	RMSLevel      float64
+	DynamicRange  float64
+	Duration      time.Duration
+	OptimalScale  float64
+	AnalysisTime  time.Duration
+}
+
+// RenderProgress represents progress updates from Pass 2 video rendering
+type RenderProgress struct {
+	Frame       int
+	TotalFrames int
+	Elapsed     time.Duration
+	BarHeights  []float64
+	FileSize    int64
+	Sensitivity float64
+	FrameData   *image.RGBA
+	VideoCodec  string
+	AudioCodec  string
+}
+
+// AudioFlushProgress represents progress during audio flushing
+type AudioFlushProgress struct {
+	PacketsProcessed int
+	Elapsed          time.Duration
+}
+
+// RenderComplete signals completion of Pass 2
+type RenderComplete struct {
+	OutputFile       string
+	Duration         time.Duration
+	FileSize         int64
+	TotalFrames      int
+	FFTTime          time.Duration
+	BinTime          time.Duration
+	DrawTime         time.Duration
+	EncodeTime       time.Duration
+	TotalTime        time.Duration
+	ThumbnailTime    time.Duration
+	SamplesProcessed int64
+}
+
+// AudioProfile holds the audio analysis results for display
+type AudioProfile struct {
+	Duration     time.Duration
+	PeakLevel    float64 // in dB
+	RMSLevel     float64 // in dB
+	DynamicRange float64 // in dB
+	OptimalScale float64
+	AnalysisTime time.Duration
+}
+
+// progressQuitMsg is sent when it's time to quit after showing completion
+type progressQuitMsg struct{}
+
+// Model implements the unified Bubbletea model for both passes
+type Model struct {
+	progressBar progress.Model
+	phase       Phase
+
+	// Audio profile (populated during/after Pass 1)
+	audioProfile *AudioProfile
+
+	// Pass 1 state
+	analysisProgress AnalysisProgress
+
+	// Pass 2 state
+	renderState RenderProgress
+	audioFlush  *AudioFlushProgress
+	complete    *RenderComplete
+
+	// Timing
+	overallStartTime time.Time
+	pass1StartTime   time.Time
+	pass2StartTime   time.Time
+	completionTime   time.Time
+
+	// UI state
+	width           int
+	height          int
+	noPreview       bool
+	cachedPreview   string
+	cachedFrameNum  int
+	completionDelay time.Duration
+	quitting        bool
+
+	// Audio flush tracking
+	estimatedAudioPackets int
+	inAudioPhase          bool
+}
+
+// NewModel creates a new unified progress UI model
+func NewModel(noPreview bool) *Model {
+	p := progress.New(
+		progress.WithDefaultGradient(),
+		progress.WithWidth(40),
+		progress.WithoutPercentage(),
+	)
+
+	return &Model{
+		progressBar:      p,
+		phase:            PhaseAnalysis,
+		overallStartTime: time.Now(),
+		pass1StartTime:   time.Now(),
+		completionDelay:  2 * time.Second,
+		noPreview:        noPreview,
+	}
+}
+
+// Init initializes the model
+func (m *Model) Init() tea.Cmd {
+	return nil
+}
+
+// Update handles messages
+func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		m.progressBar.Width = min(msg.Width-30, 50)
+		return m, nil
+
+	case AnalysisProgress:
+		m.analysisProgress = msg
+		return m, nil
+
+	case AnalysisComplete:
+		// Store audio profile for display
+		m.audioProfile = &AudioProfile{
+			Duration:     msg.Duration,
+			PeakLevel:    20 * math.Log10(msg.PeakMagnitude),
+			RMSLevel:     20 * math.Log10(msg.RMSLevel),
+			DynamicRange: msg.DynamicRange,
+			OptimalScale: msg.OptimalScale,
+			AnalysisTime: msg.AnalysisTime,
+		}
+		// Transition to rendering phase
+		m.phase = PhaseRendering
+		m.pass2StartTime = time.Now()
+		return m, nil
+
+	case RenderProgress:
+		m.renderState = msg
+		m.audioFlush = nil
+		m.inAudioPhase = false
+		m.estimatedAudioPackets = int(float64(msg.TotalFrames) * 0.36)
+		return m, nil
+
+	case AudioFlushProgress:
+		m.audioFlush = &msg
+		if !m.inAudioPhase {
+			m.inAudioPhase = true
+			if msg.PacketsProcessed > m.estimatedAudioPackets {
+				m.estimatedAudioPackets = int(float64(msg.PacketsProcessed) * 1.1)
+			}
+		}
+		return m, nil
+
+	case RenderComplete:
+		m.complete = &msg
+		m.phase = PhaseComplete
+		m.completionTime = time.Now()
+		m.quitting = true
+
+		return m, tea.Tick(m.completionDelay, func(t time.Time) tea.Msg {
+			return progressQuitMsg{}
+		})
+
+	case progressQuitMsg:
+		return m, tea.Quit
+
+	case tea.KeyMsg:
+		if m.complete != nil {
+			return m, tea.Quit
+		}
+		if msg.String() == "ctrl+c" {
+			return m, tea.Quit
+		}
+	}
+
+	return m, nil
+}
+
+// View renders the UI
+func (m *Model) View() string {
+	if m.phase == PhaseComplete {
+		return m.renderFinalProgress() + "\n" + m.renderComplete()
+	}
+	return m.renderProgress()
+}
+
+// renderFinalProgress renders the progress UI in its final completed state
+func (m *Model) renderFinalProgress() string {
+	var s strings.Builder
+
+	// Title
+	title := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#4A9B4A")).
+		Render("Jivefire 🔥")
+
+	s.WriteString(title)
+	s.WriteString("\n")
+	s.WriteString(lipgloss.NewStyle().Faint(true).Render("Pass 2: Rendering & Encoding"))
+	s.WriteString("\n\n")
+
+	// Progress bar at 100%
+	progressBar := m.progressBar.ViewAs(1.0)
+	s.WriteString("Progress: ")
+	s.WriteString(progressBar)
+	s.WriteString("  100%")
+	s.WriteString("\n\n")
+
+	// Final timing
+	s.WriteString(lipgloss.NewStyle().Faint(true).Render(
+		fmt.Sprintf("Time: %s  │  Complete", formatDuration(m.complete.TotalTime))))
+	s.WriteString("\n")
+
+	// Audio Profile
+	s.WriteString("\n")
+	m.renderAudioProfile(&s)
+
+	// Final spectrum (if we have bar heights from last render update)
+	if len(m.renderState.BarHeights) > 0 {
+		s.WriteString("\n\n")
+		s.WriteString(lipgloss.NewStyle().Faint(true).Render("Live Visualisation:"))
+		s.WriteString("\n")
+		spectrum := renderSpectrum(m.renderState.BarHeights, min(m.width-4, 72))
+		s.WriteString(spectrum)
+	}
+
+	return lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#4A9B4A")).
+		Padding(1, 2).
+		Render(s.String())
+}
+
+func (m *Model) renderProgress() string {
+	var s strings.Builder
+
+	// Title
+	title := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#A40000")).
+		Render("Jivefire 🔥")
+
+	s.WriteString(title)
+	s.WriteString("\n")
+
+	// Phase indicator
+	var phaseLabel string
+	if m.phase == PhaseAnalysis {
+		phaseLabel = "Pass 1: Analysing Audio"
+	} else {
+		phaseLabel = "Pass 2: Rendering & Encoding"
+	}
+	s.WriteString(lipgloss.NewStyle().Faint(true).Render(phaseLabel))
+	s.WriteString("\n\n")
+
+	// Progress bar and timing
+	if m.phase == PhaseAnalysis {
+		m.renderAnalysisProgress(&s)
+	} else {
+		m.renderRenderingProgress(&s)
+	}
+
+	// Audio Profile (always shown, placeholder if not yet available)
+	s.WriteString("\n")
+	m.renderAudioProfile(&s)
+
+	// Spectrum (Pass 2 only)
+	if m.phase == PhaseRendering && len(m.renderState.BarHeights) > 0 {
+		s.WriteString("\n")
+		m.renderSpectrumAndStats(&s)
+	}
+
+	return lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#A40000")).
+		Padding(1, 2).
+		Render(s.String())
+}
+
+func (m *Model) renderAnalysisProgress(s *strings.Builder) {
+	if m.analysisProgress.TotalFrames > 0 {
+		// We have frame count, show progress bar
+		percent := float64(m.analysisProgress.Frame) / float64(m.analysisProgress.TotalFrames)
+		progressBar := m.progressBar.ViewAs(percent)
+
+		s.WriteString("Progress: ")
+		s.WriteString(progressBar)
+		s.WriteString(fmt.Sprintf("  %d%%", int(percent*100)))
+		s.WriteString("\n\n")
+	} else if m.analysisProgress.Frame > 0 {
+		// No total, show frame count with elapsed time
+		s.WriteString(lipgloss.NewStyle().Faint(true).Render("Analysing..."))
+		s.WriteString(fmt.Sprintf("  %d frames  │  Elapsed: %s\n\n",
+			m.analysisProgress.Frame,
+			formatDuration(m.analysisProgress.Duration)))
+	} else {
+		s.WriteString(lipgloss.NewStyle().Faint(true).Render("Starting analysis...\n\n"))
+	}
+}
+
+func (m *Model) renderRenderingProgress(s *strings.Builder) {
+	if m.renderState.TotalFrames == 0 {
+		s.WriteString(lipgloss.NewStyle().Faint(true).Render("Starting render...\n\n"))
+		return
+	}
+
+	// Calculate unified progress across video and audio
+	videoWeight := 0.88
+	audioWeight := 0.12
+
+	videoPercent := float64(m.renderState.Frame) / float64(m.renderState.TotalFrames)
+	audioPercent := 0.0
+	var currentPhase string
+
+	if m.inAudioPhase && m.audioFlush != nil && m.estimatedAudioPackets > 0 {
+		audioPercent = float64(m.audioFlush.PacketsProcessed) / float64(m.estimatedAudioPackets)
+		if audioPercent > 1.0 {
+			audioPercent = 1.0
+		}
+		currentPhase = "Finalising audio streams"
+	} else {
+		currentPhase = fmt.Sprintf("Frame %d of %d", m.renderState.Frame, m.renderState.TotalFrames)
+	}
+
+	var overallPercent float64
+	if m.inAudioPhase {
+		overallPercent = videoWeight + (audioPercent * audioWeight)
+	} else {
+		overallPercent = videoPercent * videoWeight
+	}
+
+	progressBar := m.progressBar.ViewAs(overallPercent)
+	s.WriteString("Progress: ")
+	s.WriteString(progressBar)
+	s.WriteString(fmt.Sprintf("  %d%%", int(overallPercent*100)))
+	s.WriteString("\n\n")
+
+	// Timing information
+	elapsed := m.renderState.Elapsed
+	if elapsed == 0 {
+		elapsed = time.Since(m.pass2StartTime)
+	}
+	if m.inAudioPhase && m.audioFlush != nil && m.audioFlush.Elapsed > 0 {
+		elapsed = m.audioFlush.Elapsed
+	}
+
+	var estimatedTotal, eta time.Duration
+	var speed float64
+
+	if overallPercent > 0 {
+		estimatedTotal = time.Duration(float64(elapsed) / overallPercent)
+		eta = estimatedTotal - elapsed
+
+		videoEncodedSoFar := time.Duration(m.renderState.Frame) * time.Second / 30
+		if elapsed > 0 {
+			speed = float64(videoEncodedSoFar) / float64(elapsed)
+		}
+	}
+
+	timingInfo := fmt.Sprintf("Time: %s / %s  │  Speed: %.1fx realtime  │  ETA: %s",
+		formatDuration(elapsed),
+		formatDuration(estimatedTotal),
+		speed,
+		formatDuration(eta))
+
+	s.WriteString(lipgloss.NewStyle().Faint(true).Render(timingInfo))
+	s.WriteString("\n")
+
+	phaseStyle := lipgloss.NewStyle().Faint(true).Italic(true)
+	s.WriteString(phaseStyle.Render(currentPhase))
+}
+
+func (m *Model) renderAudioProfile(s *strings.Builder) {
+	labelStyle := lipgloss.NewStyle().Faint(true)
+	valueStyle := lipgloss.NewStyle()
+	headerStyle := lipgloss.NewStyle().Faint(true).Bold(true)
+
+	s.WriteString(headerStyle.Render("Audio"))
+	s.WriteString(" │ ")
+
+	if m.audioProfile != nil {
+		// Populated with real data
+		s.WriteString(valueStyle.Render(fmt.Sprintf("%.1fs", m.audioProfile.Duration.Seconds())))
+		s.WriteString("  ")
+		s.WriteString(labelStyle.Render("Peak:"))
+		s.WriteString(" ")
+		s.WriteString(valueStyle.Render(fmt.Sprintf("%.1f dB", m.audioProfile.PeakLevel)))
+		s.WriteString("  ")
+		s.WriteString(labelStyle.Render("RMS:"))
+		s.WriteString(" ")
+		s.WriteString(valueStyle.Render(fmt.Sprintf("%.1f dB", m.audioProfile.RMSLevel)))
+		s.WriteString("  ")
+		s.WriteString(labelStyle.Render("Range:"))
+		s.WriteString(" ")
+		s.WriteString(valueStyle.Render(fmt.Sprintf("%.1f dB", m.audioProfile.DynamicRange)))
+		s.WriteString("  ")
+		s.WriteString(labelStyle.Render("Scale:"))
+		s.WriteString(" ")
+		s.WriteString(valueStyle.Render(fmt.Sprintf("%.3f", m.audioProfile.OptimalScale)))
+	} else {
+		// Placeholder during Pass 1
+		placeholderStyle := lipgloss.NewStyle().Faint(true).Italic(true)
+		s.WriteString(placeholderStyle.Render("Analysing..."))
+	}
+}
+
+func (m *Model) renderSpectrumAndStats(s *strings.Builder) {
+	s.WriteString(lipgloss.NewStyle().Faint(true).Render("Live Visualisation:"))
+	s.WriteString("\n")
+
+	var leftCol strings.Builder
+	spectrum := renderSpectrum(m.renderState.BarHeights, min(m.width-4, 72))
+	leftCol.WriteString(spectrum)
+
+	var rightCol strings.Builder
+	if m.renderState.FileSize > 0 || m.renderState.VideoCodec != "" || m.renderState.AudioCodec != "" {
+		labelStyle := lipgloss.NewStyle().Faint(true)
+		valueStyle := lipgloss.NewStyle().Bold(true)
+
+		rightCol.WriteString(labelStyle.Render("File:  "))
+		rightCol.WriteString(valueStyle.Render(formatBytes(m.renderState.FileSize)))
+		rightCol.WriteString("\n")
+
+		if m.renderState.VideoCodec != "" {
+			rightCol.WriteString(labelStyle.Render("Video: "))
+			rightCol.WriteString(valueStyle.Render(m.renderState.VideoCodec))
+			rightCol.WriteString("\n")
+		}
+
+		if m.renderState.AudioCodec != "" {
+			rightCol.WriteString(labelStyle.Render("Audio: "))
+			rightCol.WriteString(valueStyle.Render(m.renderState.AudioCodec))
+		}
+	}
+
+	s.WriteString(lipgloss.JoinHorizontal(lipgloss.Top,
+		leftCol.String(),
+		"  ",
+		rightCol.String()))
+
+	// Video preview
+	if !m.noPreview {
+		if m.renderState.FrameData != nil && m.renderState.Frame != m.cachedFrameNum {
+			config := DefaultPreviewConfig()
+			preview := DownsampleFrame(m.renderState.FrameData, config)
+			m.cachedPreview = RenderPreview(preview)
+			m.cachedFrameNum = m.renderState.Frame
+		}
+
+		if m.cachedPreview != "" {
+			s.WriteString("\n")
+			s.WriteString(m.cachedPreview)
+		}
+	}
+}
+
+func (m *Model) renderComplete() string {
+	var s strings.Builder
+
+	title := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#4A9B4A")).
+		Render("✓ Encoding Complete!")
+
+	s.WriteString(title)
+	s.WriteString("\n\n")
+
+	// Output summary
+	s.WriteString(fmt.Sprintf("Output:   %s\n", m.complete.OutputFile))
+
+	videoDuration := time.Duration(m.complete.TotalFrames) * time.Second / 30
+	s.WriteString(fmt.Sprintf("Duration: %.1fs video in %.1fs\n",
+		videoDuration.Seconds(),
+		m.complete.TotalTime.Seconds()))
+	s.WriteString(fmt.Sprintf("Size:     %s\n\n", formatBytes(m.complete.FileSize)))
+
+	// Audio Profile section
+	headerStyle := lipgloss.NewStyle().Faint(true).Bold(true)
+	s.WriteString(headerStyle.Render("Pass 1: Audio Analysis"))
+	s.WriteString("\n")
+
+	if m.audioProfile != nil {
+		labelStyle := lipgloss.NewStyle().Faint(true)
+		s.WriteString(fmt.Sprintf("  %-18s%s\n", "Duration:", fmt.Sprintf("%.1fs", m.audioProfile.Duration.Seconds())))
+		s.WriteString(fmt.Sprintf("  %-18s%s\n", "Peak Level:", fmt.Sprintf("%.1f dB", m.audioProfile.PeakLevel)))
+		s.WriteString(fmt.Sprintf("  %-18s%s\n", "RMS Level:", fmt.Sprintf("%.1f dB", m.audioProfile.RMSLevel)))
+		s.WriteString(fmt.Sprintf("  %-18s%s\n", "Dynamic Range:", fmt.Sprintf("%.1f dB", m.audioProfile.DynamicRange)))
+		s.WriteString(fmt.Sprintf("  %-18s%s\n", "Optimal Scale:", fmt.Sprintf("%.3f", m.audioProfile.OptimalScale)))
+		s.WriteString(fmt.Sprintf("  %-18s%s\n", "Analysis Time:", labelStyle.Render(formatDuration(m.audioProfile.AnalysisTime))))
+	}
+
+	s.WriteString("\n")
+
+	// Pass 2 Performance Breakdown
+	s.WriteString(headerStyle.Render("Pass 2: Rendering & Encoding"))
+	s.WriteString("\n")
+
+	totalMs := m.complete.TotalTime.Milliseconds()
+	if totalMs == 0 {
+		totalMs = 1
+	}
+
+	if m.complete.ThumbnailTime > 0 {
+		s.WriteString(fmt.Sprintf("  %-18s%-6s (%2d%%)  %s\n",
+			"Thumbnail:",
+			formatDuration(m.complete.ThumbnailTime),
+			int(float64(m.complete.ThumbnailTime.Milliseconds())*100/float64(totalMs)),
+			makeSparkline(float64(m.complete.ThumbnailTime.Milliseconds())/float64(totalMs), 30)))
+	}
+
+	s.WriteString(fmt.Sprintf("  %-18s%-6s (%2d%%)  %s\n",
+		"FFT computation:",
+		formatDuration(m.complete.FFTTime),
+		int(float64(m.complete.FFTTime.Milliseconds())*100/float64(totalMs)),
+		makeSparkline(float64(m.complete.FFTTime.Milliseconds())/float64(totalMs), 30)))
+
+	s.WriteString(fmt.Sprintf("  %-18s%-6s (%2d%%)  %s\n",
+		"Bar binning:",
+		formatDuration(m.complete.BinTime),
+		int(float64(m.complete.BinTime.Milliseconds())*100/float64(totalMs)),
+		makeSparkline(float64(m.complete.BinTime.Milliseconds())/float64(totalMs), 30)))
+
+	s.WriteString(fmt.Sprintf("  %-18s%-6s (%2d%%)  %s\n",
+		"Rendering:",
+		formatDuration(m.complete.DrawTime),
+		int(float64(m.complete.DrawTime.Milliseconds())*100/float64(totalMs)),
+		makeSparkline(float64(m.complete.DrawTime.Milliseconds())/float64(totalMs), 30)))
+
+	s.WriteString(fmt.Sprintf("  %-18s%-6s (%2d%%)  %s\n",
+		"Video encoding:",
+		formatDuration(m.complete.EncodeTime),
+		int(float64(m.complete.EncodeTime.Milliseconds())*100/float64(totalMs)),
+		makeSparkline(float64(m.complete.EncodeTime.Milliseconds())/float64(totalMs), 30)))
+
+	// Calculate "other" time
+	accountedTime := m.complete.ThumbnailTime + m.complete.FFTTime + m.complete.BinTime +
+		m.complete.DrawTime + m.complete.EncodeTime
+	if m.audioProfile != nil {
+		accountedTime += m.audioProfile.AnalysisTime
+	}
+	otherTime := m.complete.TotalTime - accountedTime
+	if otherTime > 0 {
+		s.WriteString(fmt.Sprintf("  %-18s%-6s (%2d%%)  %s\n",
+			"Other:",
+			formatDuration(otherTime),
+			int(float64(otherTime.Milliseconds())*100/float64(totalMs)),
+			makeSparkline(float64(otherTime.Milliseconds())/float64(totalMs), 30)))
+	}
+
+	s.WriteString(fmt.Sprintf("\n  %-18s%s\n\n", "Total time:", formatDuration(m.complete.TotalTime)))
+
+	// Quality Metrics
+	s.WriteString(lipgloss.NewStyle().Faint(true).Bold(true).Render("Quality Metrics:"))
+	s.WriteString("\n")
+	s.WriteString(fmt.Sprintf("  Video: %d frames, %.2f fps average\n",
+		m.complete.TotalFrames,
+		float64(m.complete.TotalFrames)/videoDuration.Seconds()))
+
+	if m.complete.SamplesProcessed > 0 {
+		s.WriteString(fmt.Sprintf("  Audio: %d samples processed",
+			m.complete.SamplesProcessed))
+	}
+
+	return lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#4A9B4A")).
+		Padding(1, 1).
+		Render(s.String()) + "\n"
+}
+
+// Helper functions
+
+func formatDuration(d time.Duration) string {
+	if d == 0 {
+		return "0s"
+	}
+	if d < time.Second {
+		return fmt.Sprintf("%dms", d.Milliseconds())
+	}
+	return fmt.Sprintf("%.1fs", d.Seconds())
+}
+
+func formatBytes(bytes int64) string {
+	if bytes == 0 {
+		return "0 B"
+	}
+
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+
+	units := []string{"KB", "MB", "GB"}
+	return fmt.Sprintf("%.1f %s", float64(bytes)/float64(div), units[exp])
+}
+
+func makeSparkline(ratio float64, width int) string {
+	blocks := []rune{'░', '▓', '█'}
+
+	filled := int(ratio * float64(width))
+	if filled > width {
+		filled = width
+	}
+
+	var result strings.Builder
+	for i := 0; i < width; i++ {
+		if i < filled {
+			result.WriteRune(blocks[2]) // Full block
+		} else {
+			result.WriteRune(blocks[0]) // Empty block
+		}
+	}
+
+	return result.String()
+}
+
+// renderSpectrum creates an ASCII visualisation of bar heights
+func renderSpectrum(barHeights []float64, width int) string {
+	if len(barHeights) == 0 || width == 0 {
+		return ""
+	}
+
+	blocks := []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
+
+	// Sample bars to fit width
+	stride := len(barHeights) / width
+	if stride == 0 {
+		stride = 1
+	}
+
+	// Find max height for normalisation
+	maxHeight := 0.0
+	for _, h := range barHeights {
+		if h > maxHeight {
+			maxHeight = h
+		}
+	}
+
+	if maxHeight == 0 {
+		maxHeight = 1.0 // Avoid division by zero
+	}
+
+	var result strings.Builder
+	for i := 0; i < len(barHeights); i += stride {
+		if result.Len() >= width {
+			break
+		}
+
+		height := barHeights[i]
+		normalised := height / maxHeight // 0.0 to 1.0
+		blockIdx := int(normalised * float64(len(blocks)-1))
+		if blockIdx >= len(blocks) {
+			blockIdx = len(blocks) - 1
+		}
+
+		result.WriteRune(blocks[blockIdx])
+	}
+
+	return result.String()
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}

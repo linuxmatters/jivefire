@@ -13,7 +13,7 @@ cmd/jivefire/main.go     → CLI entry, 2-pass coordinator
 internal/audio/          → FFmpegDecoder (AudioDecoder interface), FFT analysis
 internal/encoder/        → ffmpeg-statigo wrapper, RGB→YUV conversion, FIFO buffer
 internal/renderer/       → Frame generation, bar drawing, thumbnail
-internal/ui/             → Bubbletea TUI (pass1.go, pass2.go)
+internal/ui/             → Bubbletea TUI (unified progress.go for both passes)
 internal/config/         → Constants (dimensions, FFT params, colours)
 third_party/ffmpeg-statigo/  # Git submodule: FFmpeg 8.0 static bindings
 ```
@@ -79,9 +79,10 @@ just vhs
 - Gradient/alpha tables: pre-computed in `NewFrame()`
 
 ### Changing UI output
-- Pass 1 progress: `internal/ui/pass1.go`
-- Pass 2 progress + completion summary: `internal/ui/pass2.go`
-- Performance breakdown fields: `Pass2Complete` struct
+- Unified progress UI: `internal/ui/progress.go` (handles both passes)
+- Message types: `AnalysisProgress`, `AnalysisComplete`, `RenderProgress`, `RenderComplete`
+- Audio profile display persists from Pass 1 through Pass 2
+- Video preview: `internal/ui/preview.go`
 
 ## Environment
 - NixOS development shell via `flake.nix`

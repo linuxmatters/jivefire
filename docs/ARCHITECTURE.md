@@ -107,9 +107,10 @@ Bars 0-31 are mirrored to create bars 32-63. Renderer draws upper-left quadrant 
 **Result:** 4x rendering speedup via reduced pixel writes.
 
 ### Bubbletea Live Preview
-Terminal UI shows:
-- Pass 1: Real-time FFT bar preview during analysis
-- Pass 2: Encoding stats + mini ASCII spectrum visualisation
+Unified terminal UI (`progress.go`) shows:
+- **Pass 1:** Progress bar with frame count, audio profile placeholder
+- **Pass 2:** Progress bar, timing/ETA, audio profile (persisted), spectrum visualisation, video preview
+- **Completion:** Final progress state + consolidated summary with metrics from both passes
 
 Preview renders via Unicode blocks (`▁▂▃▄▅▆▇█`) using actual bar heights from renderer. Non-blocking goroutine channels prevent UI updates from stalling the encoding pipeline.
 
@@ -122,7 +123,7 @@ cmd/jivefire/main.go     → CLI entry, 2-pass coordinator
 internal/audio/          → FFmpegDecoder (AudioDecoder interface), FFT analysis
 internal/encoder/        → ffmpeg-statigo wrapper, RGB→YUV conversion, FIFO buffer
 internal/renderer/       → Frame generation, bar drawing, thumbnail
-internal/ui/             → Bubbletea TUI (pass1.go, pass2.go)
+internal/ui/             → Bubbletea TUI (unified progress.go for both passes)
 internal/config/         → Constants (dimensions, FFT params, colours)
 ```
 
