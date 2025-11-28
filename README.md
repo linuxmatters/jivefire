@@ -10,13 +10,13 @@ Your podcast audio deserves more than a static image on YouTube. Jivefire transf
 
 ### What's Cooking
 
-- 🖼️ **Thumbnail generator**—YouTube-style PNG with your title, saved alongside the video
-- 🎬 **1280×720 @ 30fps** H.264/AAC MP4—YouTube-ready, no questions asked
+- 🖼️ **Thumbnail generator** YouTube-style PNG with your title, saved alongside the video
+- 🎬 **1280×720 @ 30fps** H.264/AAC YouTube-ready MP4, no questions asked
   - 🎚️ **64 frequency bars** that actually look discrete (not that smeared spectrum nonsense)
-  - 🪞 **Symmetric mirroring** above and below centre—double the visual impact
-  - 🔬 **FFT-based analysis** (2048-point Hanning window, log scale frequency binning)
+  - 🪞 **Symmetric mirroring** above and below centre, doubles the visual impact
+  - 🔬 **FFT-based analysis** 2048-point Hanning window, log scale frequency binning
   - ✨ **Smooth decay animation** à la CAVA—bars rise fast, fall gracefully
-- 🚀 **Stupidly fast**—streaming pipeline, parallel RGB→YUV, zero bloat
+- 🚀 **Stupidly fast** streaming pipeline, parallel RGB→YUV, zero bloat
 - 📦 **Single binary** No Python. No FFmpeg install required. Just drop and render
   - 🐧 **Linux** (amd64 and aarch64)
   - 🍏 **macOS** (x86 and Apple Silicon)
@@ -43,17 +43,16 @@ Your podcast audio deserves more than a static image on YouTube. Jivefire transf
 
 ## Build
 
-Jivefire uses [ffmpeg-statigo](https://github.com/linuxmatters/ffmpeg-statigo) for FFmpeg 8.0 static bindings.
+Jivefire uses [ffmpeg-statigo](https://github.com/linuxmatters/ffmpeg-statigo) for FFmpeg static bindings.
 
 ```bash
-# First time setup (download FFmpeg libraries)
-git submodule update --init --recursive
+# Setup or update ffmpeg-statigo submodule and library
 just setup
 
 # Build and test
-just build      # Build binary
-just test       # Run tests
-just test-mp3   # Render test audio
+just build        # Build binary
+just test         # Run tests
+just test-encoder # Test encoder
 ```
 
 ## Why Jivefire?
