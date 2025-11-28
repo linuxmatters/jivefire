@@ -12,6 +12,19 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// Fire colour palette 🔥
+var (
+	// Core fire colours (dark to bright)
+	fireYellow  = lipgloss.Color("#FFD700") // Bright yellow
+	fireOrange  = lipgloss.Color("#FF8C00") // Deep orange
+	fireRed     = lipgloss.Color("#FF4500") // Orange-red
+	fireCrimson = lipgloss.Color("#DC143C") // Deep crimson
+	emberGlow   = lipgloss.Color("#8B0000") // Dark ember red
+
+	// Accent colours
+	warmGray = lipgloss.Color("#B8860B") // Dark goldenrod for subtle text
+)
+
 // Phase represents the current processing phase
 type Phase int
 
@@ -91,6 +104,7 @@ type progressQuitMsg struct{}
 // Model implements the unified Bubbletea model for both passes
 type Model struct {
 	progressBar progress.Model
+	summaryBar  progress.Model
 	phase       Phase
 
 	// Audio profile (populated during/after Pass 1)
@@ -126,14 +140,23 @@ type Model struct {
 
 // NewModel creates a new unified progress UI model
 func NewModel(noPreview bool) *Model {
+	// Fire gradient: deep red → orange → yellow
 	p := progress.New(
-		progress.WithDefaultGradient(),
+		progress.WithGradient(string(fireCrimson), string(fireYellow)),
 		progress.WithWidth(40),
+		progress.WithoutPercentage(),
+	)
+
+	// Smaller progress bar for summary performance charts
+	summaryBar := progress.New(
+		progress.WithGradient(string(fireCrimson), string(fireYellow)),
+		progress.WithWidth(30),
 		progress.WithoutPercentage(),
 	)
 
 	return &Model{
 		progressBar:      p,
+		summaryBar:       summaryBar,
 		phase:            PhaseAnalysis,
 		overallStartTime: time.Now(),
 		pass1StartTime:   time.Now(),
@@ -232,12 +255,12 @@ func (m *Model) renderFinalProgress() string {
 	// Title
 	title := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#4A9B4A")).
+		Foreground(fireYellow).
 		Render("Jivefire 🔥")
 
 	s.WriteString(title)
 	s.WriteString("\n")
-	s.WriteString(lipgloss.NewStyle().Faint(true).Render("Pass 2: Rendering & Encoding"))
+	s.WriteString(lipgloss.NewStyle().Foreground(fireOrange).Render("Pass 2: Rendering & Encoding"))
 	s.WriteString("\n\n")
 
 	// Progress bar at 100%
@@ -247,27 +270,38 @@ func (m *Model) renderFinalProgress() string {
 	s.WriteString("  100%")
 	s.WriteString("\n\n")
 
-	// Final timing
+	// Final timing - calculate and display final speed
+	videoDuration := time.Duration(m.complete.TotalFrames) * time.Second / 30
+	var finalSpeed float64
+	if m.complete.TotalTime > 0 {
+		finalSpeed = float64(videoDuration) / float64(m.complete.TotalTime)
+	}
 	s.WriteString(lipgloss.NewStyle().Faint(true).Render(
-		fmt.Sprintf("Time: %s  │  Complete", formatDuration(m.complete.TotalTime))))
+		fmt.Sprintf("Time: %s  │  Speed: %.1fx realtime  │  Complete", formatDuration(m.complete.TotalTime), finalSpeed)))
 	s.WriteString("\n")
 
 	// Audio Profile
 	s.WriteString("\n")
 	m.renderAudioProfile(&s)
 
-	// Final spectrum (if we have bar heights from last render update)
-	if len(m.renderState.BarHeights) > 0 {
-		s.WriteString("\n\n")
-		s.WriteString(lipgloss.NewStyle().Faint(true).Render("Live Visualisation:"))
-		s.WriteString("\n")
-		spectrum := renderSpectrum(m.renderState.BarHeights, min(m.width-4, 72))
-		s.WriteString(spectrum)
+	// Final spectrum - zeroed out to show clean state
+	spectrumWidth := m.width - 4
+	if spectrumWidth < 10 {
+		spectrumWidth = 100 // default if terminal size not set
+	} else if spectrumWidth > 100 {
+		spectrumWidth = 100
 	}
+	s.WriteString("\n\n")
+	s.WriteString(lipgloss.NewStyle().Faint(true).Render("Live Visualisation:"))
+	s.WriteString("\n")
+	// Create zeroed bar heights for clean display
+	zeroedBars := make([]float64, 64)
+	spectrum := renderSpectrum(zeroedBars, spectrumWidth)
+	s.WriteString(spectrum)
 
 	return lipgloss.NewStyle().
 		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#4A9B4A")).
+		BorderForeground(fireOrange).
 		Padding(1, 2).
 		Render(s.String())
 }
@@ -278,7 +312,7 @@ func (m *Model) renderProgress() string {
 	// Title
 	title := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#A40000")).
+		Foreground(fireYellow).
 		Render("Jivefire 🔥")
 
 	s.WriteString(title)
@@ -291,7 +325,7 @@ func (m *Model) renderProgress() string {
 	} else {
 		phaseLabel = "Pass 2: Rendering & Encoding"
 	}
-	s.WriteString(lipgloss.NewStyle().Faint(true).Render(phaseLabel))
+	s.WriteString(lipgloss.NewStyle().Foreground(fireOrange).Render(phaseLabel))
 	s.WriteString("\n\n")
 
 	// Progress bar and timing
@@ -313,7 +347,7 @@ func (m *Model) renderProgress() string {
 
 	return lipgloss.NewStyle().
 		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#A40000")).
+		BorderForeground(fireRed).
 		Padding(1, 2).
 		Render(s.String())
 }
@@ -446,16 +480,19 @@ func (m *Model) renderAudioProfile(s *strings.Builder) {
 }
 
 func (m *Model) renderSpectrumAndStats(s *strings.Builder) {
-	s.WriteString(lipgloss.NewStyle().Faint(true).Render("Live Visualisation:"))
+	s.WriteString(lipgloss.NewStyle().Foreground(fireOrange).Render("Live Visualisation:"))
 	s.WriteString("\n")
 
-	var leftCol strings.Builder
-	spectrum := renderSpectrum(m.renderState.BarHeights, min(m.width-4, 72))
-	leftCol.WriteString(spectrum)
+	// Use full width for spectrum (64 bars matches the actual bar count)
+	spectrumWidth := 64
+	if m.width > 10 {
+		spectrumWidth = min(m.width-10, 64)
+	}
+	spectrum := renderSpectrum(m.renderState.BarHeights, spectrumWidth)
 
 	var rightCol strings.Builder
 	if m.renderState.FileSize > 0 || m.renderState.VideoCodec != "" || m.renderState.AudioCodec != "" {
-		labelStyle := lipgloss.NewStyle().Faint(true)
+		labelStyle := lipgloss.NewStyle().Foreground(warmGray)
 		valueStyle := lipgloss.NewStyle().Bold(true)
 
 		rightCol.WriteString(labelStyle.Render("File:  "))
@@ -475,7 +512,7 @@ func (m *Model) renderSpectrumAndStats(s *strings.Builder) {
 	}
 
 	s.WriteString(lipgloss.JoinHorizontal(lipgloss.Top,
-		leftCol.String(),
+		spectrum,
 		"  ",
 		rightCol.String()))
 
@@ -500,34 +537,48 @@ func (m *Model) renderComplete() string {
 
 	title := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#4A9B4A")).
+		Foreground(fireYellow).
 		Render("✓ Encoding Complete!")
 
 	s.WriteString(title)
 	s.WriteString("\n\n")
 
+	// Styles for output summary
+	dimLabel := lipgloss.NewStyle().Faint(true)
+
 	// Output summary
-	s.WriteString(fmt.Sprintf("Output:   %s\n", m.complete.OutputFile))
+	s.WriteString(fmt.Sprintf("%s%s\n", dimLabel.Render("Output:   "), m.complete.OutputFile))
 
 	videoDuration := time.Duration(m.complete.TotalFrames) * time.Second / 30
-	s.WriteString(fmt.Sprintf("Duration: %.1fs video in %.1fs\n",
+	s.WriteString(fmt.Sprintf("%s%d frames, %.2f fps average\n",
+		dimLabel.Render("Video:    "),
+		m.complete.TotalFrames,
+		float64(m.complete.TotalFrames)/videoDuration.Seconds()))
+	if m.complete.SamplesProcessed > 0 {
+		s.WriteString(fmt.Sprintf("%s%d samples processed\n", dimLabel.Render("Audio:    "), m.complete.SamplesProcessed))
+	}
+	s.WriteString(fmt.Sprintf("%s%.1fs video in %.1fs\n",
+		dimLabel.Render("Duration: "),
 		videoDuration.Seconds(),
 		m.complete.TotalTime.Seconds()))
-	s.WriteString(fmt.Sprintf("Size:     %s\n\n", formatBytes(m.complete.FileSize)))
+	s.WriteString(fmt.Sprintf("%s%s\n\n", dimLabel.Render("Size:     "), formatBytes(m.complete.FileSize)))
 
 	// Audio Profile section
-	headerStyle := lipgloss.NewStyle().Faint(true).Bold(true)
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(fireOrange)
+	labelStyle := lipgloss.NewStyle().Faint(true)
+	valueStyle := lipgloss.NewStyle()
+	highlightValueStyle := lipgloss.NewStyle().Foreground(fireOrange)
+
 	s.WriteString(headerStyle.Render("Pass 1: Audio Analysis"))
 	s.WriteString("\n")
 
 	if m.audioProfile != nil {
-		labelStyle := lipgloss.NewStyle().Faint(true)
-		s.WriteString(fmt.Sprintf("  %-18s%s\n", "Duration:", fmt.Sprintf("%.1fs", m.audioProfile.Duration.Seconds())))
-		s.WriteString(fmt.Sprintf("  %-18s%s\n", "Peak Level:", fmt.Sprintf("%.1f dB", m.audioProfile.PeakLevel)))
-		s.WriteString(fmt.Sprintf("  %-18s%s\n", "RMS Level:", fmt.Sprintf("%.1f dB", m.audioProfile.RMSLevel)))
-		s.WriteString(fmt.Sprintf("  %-18s%s\n", "Dynamic Range:", fmt.Sprintf("%.1f dB", m.audioProfile.DynamicRange)))
-		s.WriteString(fmt.Sprintf("  %-18s%s\n", "Optimal Scale:", fmt.Sprintf("%.3f", m.audioProfile.OptimalScale)))
-		s.WriteString(fmt.Sprintf("  %-18s%s\n", "Analysis Time:", labelStyle.Render(formatDuration(m.audioProfile.AnalysisTime))))
+		s.WriteString(fmt.Sprintf("  %s%s\n", labelStyle.Render(fmt.Sprintf("%-18s", "Duration:")), valueStyle.Render(fmt.Sprintf("%.1fs", m.audioProfile.Duration.Seconds()))))
+		s.WriteString(fmt.Sprintf("  %s%s\n", labelStyle.Render(fmt.Sprintf("%-18s", "Peak Level:")), valueStyle.Render(fmt.Sprintf("%.1f dB", m.audioProfile.PeakLevel))))
+		s.WriteString(fmt.Sprintf("  %s%s\n", labelStyle.Render(fmt.Sprintf("%-18s", "RMS Level:")), valueStyle.Render(fmt.Sprintf("%.1f dB", m.audioProfile.RMSLevel))))
+		s.WriteString(fmt.Sprintf("  %s%s\n", labelStyle.Render(fmt.Sprintf("%-18s", "Dynamic Range:")), valueStyle.Render(fmt.Sprintf("%.1f dB", m.audioProfile.DynamicRange))))
+		s.WriteString(fmt.Sprintf("  %s%s\n", labelStyle.Render(fmt.Sprintf("%-18s", "Optimal Scale:")), valueStyle.Render(fmt.Sprintf("%.3f", m.audioProfile.OptimalScale))))
+		s.WriteString(fmt.Sprintf("  %s%s\n", labelStyle.Render(fmt.Sprintf("%-18s", "Analysis Time:")), highlightValueStyle.Render(formatDuration(m.audioProfile.AnalysisTime))))
 	}
 
 	s.WriteString("\n")
@@ -542,36 +593,36 @@ func (m *Model) renderComplete() string {
 	}
 
 	if m.complete.ThumbnailTime > 0 {
-		s.WriteString(fmt.Sprintf("  %-18s%-6s (%2d%%)  %s\n",
-			"Thumbnail:",
-			formatDuration(m.complete.ThumbnailTime),
+		s.WriteString(fmt.Sprintf("  %s%s (%2d%%)  %s\n",
+			labelStyle.Render(fmt.Sprintf("%-18s", "Thumbnail:")),
+			valueStyle.Render(fmt.Sprintf("%-6s", formatDuration(m.complete.ThumbnailTime))),
 			int(float64(m.complete.ThumbnailTime.Milliseconds())*100/float64(totalMs)),
-			makeSparkline(float64(m.complete.ThumbnailTime.Milliseconds())/float64(totalMs), 30)))
+			m.summaryBar.ViewAs(float64(m.complete.ThumbnailTime.Milliseconds())/float64(totalMs))))
 	}
 
-	s.WriteString(fmt.Sprintf("  %-18s%-6s (%2d%%)  %s\n",
-		"FFT computation:",
-		formatDuration(m.complete.FFTTime),
+	s.WriteString(fmt.Sprintf("  %s%s (%2d%%)  %s\n",
+		labelStyle.Render(fmt.Sprintf("%-18s", "FFT computation:")),
+		valueStyle.Render(fmt.Sprintf("%-6s", formatDuration(m.complete.FFTTime))),
 		int(float64(m.complete.FFTTime.Milliseconds())*100/float64(totalMs)),
-		makeSparkline(float64(m.complete.FFTTime.Milliseconds())/float64(totalMs), 30)))
+		m.summaryBar.ViewAs(float64(m.complete.FFTTime.Milliseconds())/float64(totalMs))))
 
-	s.WriteString(fmt.Sprintf("  %-18s%-6s (%2d%%)  %s\n",
-		"Bar binning:",
-		formatDuration(m.complete.BinTime),
+	s.WriteString(fmt.Sprintf("  %s%s (%2d%%)  %s\n",
+		labelStyle.Render(fmt.Sprintf("%-18s", "Bar binning:")),
+		valueStyle.Render(fmt.Sprintf("%-6s", formatDuration(m.complete.BinTime))),
 		int(float64(m.complete.BinTime.Milliseconds())*100/float64(totalMs)),
-		makeSparkline(float64(m.complete.BinTime.Milliseconds())/float64(totalMs), 30)))
+		m.summaryBar.ViewAs(float64(m.complete.BinTime.Milliseconds())/float64(totalMs))))
 
-	s.WriteString(fmt.Sprintf("  %-18s%-6s (%2d%%)  %s\n",
-		"Rendering:",
-		formatDuration(m.complete.DrawTime),
+	s.WriteString(fmt.Sprintf("  %s%s (%2d%%)  %s\n",
+		labelStyle.Render(fmt.Sprintf("%-18s", "Rendering:")),
+		valueStyle.Render(fmt.Sprintf("%-6s", formatDuration(m.complete.DrawTime))),
 		int(float64(m.complete.DrawTime.Milliseconds())*100/float64(totalMs)),
-		makeSparkline(float64(m.complete.DrawTime.Milliseconds())/float64(totalMs), 30)))
+		m.summaryBar.ViewAs(float64(m.complete.DrawTime.Milliseconds())/float64(totalMs))))
 
-	s.WriteString(fmt.Sprintf("  %-18s%-6s (%2d%%)  %s\n",
-		"Video encoding:",
-		formatDuration(m.complete.EncodeTime),
+	s.WriteString(fmt.Sprintf("  %s%s (%2d%%)  %s\n",
+		labelStyle.Render(fmt.Sprintf("%-18s", "Video encoding:")),
+		valueStyle.Render(fmt.Sprintf("%-6s", formatDuration(m.complete.EncodeTime))),
 		int(float64(m.complete.EncodeTime.Milliseconds())*100/float64(totalMs)),
-		makeSparkline(float64(m.complete.EncodeTime.Milliseconds())/float64(totalMs), 30)))
+		m.summaryBar.ViewAs(float64(m.complete.EncodeTime.Milliseconds())/float64(totalMs))))
 
 	// Calculate "other" time
 	accountedTime := m.complete.ThumbnailTime + m.complete.FFTTime + m.complete.BinTime +
@@ -581,30 +632,18 @@ func (m *Model) renderComplete() string {
 	}
 	otherTime := m.complete.TotalTime - accountedTime
 	if otherTime > 0 {
-		s.WriteString(fmt.Sprintf("  %-18s%-6s (%2d%%)  %s\n",
-			"Other:",
-			formatDuration(otherTime),
+		s.WriteString(fmt.Sprintf("  %s%s (%2d%%)  %s\n",
+			labelStyle.Render(fmt.Sprintf("%-18s", "Other:")),
+			valueStyle.Render(fmt.Sprintf("%-6s", formatDuration(otherTime))),
 			int(float64(otherTime.Milliseconds())*100/float64(totalMs)),
-			makeSparkline(float64(otherTime.Milliseconds())/float64(totalMs), 30)))
+			m.summaryBar.ViewAs(float64(otherTime.Milliseconds())/float64(totalMs))))
 	}
 
-	s.WriteString(fmt.Sprintf("\n  %-18s%s\n\n", "Total time:", formatDuration(m.complete.TotalTime)))
-
-	// Quality Metrics
-	s.WriteString(lipgloss.NewStyle().Faint(true).Bold(true).Render("Quality Metrics:"))
-	s.WriteString("\n")
-	s.WriteString(fmt.Sprintf("  Video: %d frames, %.2f fps average\n",
-		m.complete.TotalFrames,
-		float64(m.complete.TotalFrames)/videoDuration.Seconds()))
-
-	if m.complete.SamplesProcessed > 0 {
-		s.WriteString(fmt.Sprintf("  Audio: %d samples processed",
-			m.complete.SamplesProcessed))
-	}
+	s.WriteString(fmt.Sprintf("  %s%s", labelStyle.Render(fmt.Sprintf("%-18s", "Total time:")), highlightValueStyle.Render(formatDuration(m.complete.TotalTime))))
 
 	return lipgloss.NewStyle().
 		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#4A9B4A")).
+		BorderForeground(fireOrange).
 		Padding(1, 1).
 		Render(s.String()) + "\n"
 }
@@ -642,8 +681,6 @@ func formatBytes(bytes int64) string {
 }
 
 func makeSparkline(ratio float64, width int) string {
-	blocks := []rune{'░', '▓', '█'}
-
 	filled := int(ratio * float64(width))
 	if filled > width {
 		filled = width
@@ -652,22 +689,94 @@ func makeSparkline(ratio float64, width int) string {
 	var result strings.Builder
 	for i := 0; i < width; i++ {
 		if i < filled {
-			result.WriteRune(blocks[2]) // Full block
+			// Fire gradient: dark red → red → orange → yellow based on position
+			pos := float64(i) / float64(width)
+			var color lipgloss.Color
+			if pos < 0.25 {
+				color = emberGlow
+			} else if pos < 0.5 {
+				color = fireCrimson
+			} else if pos < 0.75 {
+				color = fireOrange
+			} else {
+				color = fireYellow
+			}
+			styledBlock := lipgloss.NewStyle().Foreground(color).Render("█")
+			result.WriteString(styledBlock)
 		} else {
-			result.WriteRune(blocks[0]) // Empty block
+			// Empty block in warm gray
+			styledBlock := lipgloss.NewStyle().Foreground(lipgloss.Color("#3A3A3A")).Render("░")
+			result.WriteString(styledBlock)
 		}
 	}
 
 	return result.String()
 }
 
-// renderSpectrum creates an ASCII visualisation of bar heights
+// makeGradientBar creates a subtle gradient progress bar similar to the main progress bar
+func makeGradientBar(ratio float64, width int) string {
+	filled := int(ratio * float64(width))
+	if filled > width {
+		filled = width
+	}
+	if filled < 0 {
+		filled = 0
+	}
+
+	var result strings.Builder
+
+	// Gradient colours from left to right (subtle fire gradient)
+	gradientColors := []lipgloss.Color{
+		lipgloss.Color("#8B0000"), // Dark red
+		lipgloss.Color("#A52A2A"), // Brown-red
+		lipgloss.Color("#CD5C5C"), // Indian red
+		lipgloss.Color("#DC143C"), // Crimson
+		lipgloss.Color("#FF6347"), // Tomato
+		lipgloss.Color("#FF7F50"), // Coral
+		lipgloss.Color("#FFA07A"), // Light salmon
+		lipgloss.Color("#FFD700"), // Gold
+	}
+
+	for i := 0; i < width; i++ {
+		if i < filled {
+			// Interpolate colour based on position within the filled portion
+			pos := float64(i) / float64(width)
+			colorIdx := int(pos * float64(len(gradientColors)-1))
+			if colorIdx >= len(gradientColors) {
+				colorIdx = len(gradientColors) - 1
+			}
+			styledBlock := lipgloss.NewStyle().Foreground(gradientColors[colorIdx]).Render("█")
+			result.WriteString(styledBlock)
+		} else {
+			// Empty portion - subtle dark background
+			styledBlock := lipgloss.NewStyle().Foreground(lipgloss.Color("#2A2A2A")).Render("░")
+			result.WriteString(styledBlock)
+		}
+	}
+
+	return result.String()
+}
+
+// renderSpectrum creates a fire-coloured ASCII visualisation of bar heights
+// Now renders 2 rows tall for better visibility
 func renderSpectrum(barHeights []float64, width int) string {
 	if len(barHeights) == 0 || width == 0 {
 		return ""
 	}
 
 	blocks := []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
+
+	// Fire gradient colours from low to high intensity
+	fireColors := []lipgloss.Color{
+		lipgloss.Color("#8B0000"), // Dark red (ember)
+		lipgloss.Color("#B22222"), // Firebrick
+		lipgloss.Color("#DC143C"), // Crimson
+		lipgloss.Color("#FF4500"), // Orange-red
+		lipgloss.Color("#FF6347"), // Tomato
+		lipgloss.Color("#FF8C00"), // Dark orange
+		lipgloss.Color("#FFA500"), // Orange
+		lipgloss.Color("#FFD700"), // Gold/Yellow
+	}
 
 	// Sample bars to fit width
 	stride := len(barHeights) / width
@@ -687,20 +796,70 @@ func renderSpectrum(barHeights []float64, width int) string {
 		maxHeight = 1.0 // Avoid division by zero
 	}
 
+	// Collect normalised heights for all bars we'll display
+	displayHeights := make([]float64, 0, width)
+	for i := 0; i < len(barHeights) && len(displayHeights) < width; i += stride {
+		displayHeights = append(displayHeights, barHeights[i]/maxHeight)
+	}
+
 	var result strings.Builder
-	for i := 0; i < len(barHeights); i += stride {
-		if result.Len() >= width {
-			break
-		}
 
-		height := barHeights[i]
-		normalised := height / maxHeight // 0.0 to 1.0
-		blockIdx := int(normalised * float64(len(blocks)-1))
-		if blockIdx >= len(blocks) {
+	// Render top row (upper half of bars, only shows if height > 0.5)
+	for _, normalised := range displayHeights {
+		// Top row: shows the portion above 0.5
+		if normalised > 0.5 {
+			// Map 0.5-1.0 to block index 0-7
+			topPortion := (normalised - 0.5) * 2.0 // 0.0 to 1.0
+			blockIdx := int(topPortion * float64(len(blocks)-1))
+			if blockIdx >= len(blocks) {
+				blockIdx = len(blocks) - 1
+			}
+
+			// Colour based on overall height (hotter = higher)
+			colorIdx := int(normalised * float64(len(fireColors)-1))
+			if colorIdx >= len(fireColors) {
+				colorIdx = len(fireColors) - 1
+			}
+
+			styledBlock := lipgloss.NewStyle().
+				Foreground(fireColors[colorIdx]).
+				Render(string(blocks[blockIdx]))
+			result.WriteString(styledBlock)
+		} else {
+			// Empty space for bars that don't reach this row
+			result.WriteString(" ")
+		}
+	}
+
+	result.WriteString("\n")
+
+	// Render bottom row (lower half of bars)
+	for _, normalised := range displayHeights {
+		var blockIdx int
+		if normalised >= 0.5 {
+			// Full block for bottom row if bar extends to top row
 			blockIdx = len(blocks) - 1
+		} else {
+			// Map 0.0-0.5 to block index 0-7
+			blockIdx = int(normalised * 2.0 * float64(len(blocks)-1))
+			if blockIdx >= len(blocks) {
+				blockIdx = len(blocks) - 1
+			}
 		}
 
-		result.WriteRune(blocks[blockIdx])
+		// Colour based on overall height
+		colorIdx := int(normalised * float64(len(fireColors)-1))
+		if colorIdx >= len(fireColors) {
+			colorIdx = len(fireColors) - 1
+		}
+		if colorIdx < 0 {
+			colorIdx = 0
+		}
+
+		styledBlock := lipgloss.NewStyle().
+			Foreground(fireColors[colorIdx]).
+			Render(string(blocks[blockIdx]))
+		result.WriteString(styledBlock)
 	}
 
 	return result.String()

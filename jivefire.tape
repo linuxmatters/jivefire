@@ -58,11 +58,12 @@
 Output .github/jivefire.gif
 
 Require ./jivefire
+Require ./testdata/LMP0.flac
 
 Set Shell "fish"
 Set FontSize 13
-Set Width 860
-Set Height 780
+Set Width 840
+Set Height 760
 Set Padding 8
 Set WindowBar ColorfulRight
 Set WindowBarSize 32
@@ -71,4 +72,4 @@ Set Theme catppuccin-mocha
 
 Type "./jivefire --episode=0 --title='Linux Matters Jivefire' testdata/LMP0.flac testdata/LMP0.mp4" Sleep 250ms  Enter
 
-Sleep 13s
+Sleep 10s

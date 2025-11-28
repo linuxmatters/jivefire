@@ -73,7 +73,7 @@ test-flac: build
       ffmpeg -i testdata/LMP0.mp3 -ac 2 testdata/LMP0-stereo.flac
     fi
     ./jivefire --episode="01" --title "Linux Matters flac (mono)" testdata/LMP0.flac testdata/LMP0-flac.mp4
-    ./jivefire --episode="02" --title "Linux Matters flac (stereo)" testdata/LMP0-stereo.flac testdata/LMP0-flac-stereo.mp4
+    ./jivefire --no-preview --episode="02" --title "Linux Matters flac (stereo)" testdata/LMP0-stereo.flac testdata/LMP0-flac-stereo.mp4
 
 # Render video from LMP0.mp3
 test-mp3: build
@@ -82,7 +82,7 @@ test-mp3: build
       ffmpeg -i testdata/LMP0.mp3 -ac 2 testdata/LMP0-stereo.mp3
     fi
     ./jivefire --episode="01" --title "Linux Matters mp3 (mono)" testdata/LMP0.mp3 testdata/LMP0-mp3.mp4
-    ./jivefire --episode="02" --title "Linux Matters mp3 (stereo)" testdata/LMP0-stereo.mp3 testdata/LMP0-mp3-stereo.mp4
+    ./jivefire --no-preview  --episode="02" --title "Linux Matters mp3 (stereo)" testdata/LMP0-stereo.mp3 testdata/LMP0-mp3-stereo.mp4
 
 # Render video from LMP0.wav
 test-wav: build
@@ -94,7 +94,7 @@ test-wav: build
       ffmpeg -i testdata/LMP0.mp3 -ac 2 testdata/LMP0-stereo.wav
     fi
     ./jivefire --episode="01" --title "Linux Matters: wav (mono)" testdata/LMP0.wav testdata/LMP0-wav.mp4
-    ./jivefire --episode="02" --title "Linux Matters: wav (stereo)" testdata/LMP0-stereo.wav testdata/LMP0-wav-stereo.mp4
+    ./jivefire --no-preview  --episode="02" --title "Linux Matters: wav (stereo)" testdata/LMP0-stereo.wav testdata/LMP0-wav-stereo.mp4
 
 # Test partial episode 67 with FLAC input
 test-67: build
