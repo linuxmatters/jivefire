@@ -1,6 +1,6 @@
 # Jivefire 🔥
 
-> Spin your podcast .wav into a groovy MP4 visualiser. [Cava](https://github.com/karlstav/cava)-inspired real-time audio frequencies.
+> Spin your podcast .wav into a groovy MP4 visualiser with [Cava](https://github.com/karlstav/cava)-inspired real-time audio frequencies.
 
 ## The Groove
 

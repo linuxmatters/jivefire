@@ -53,7 +53,13 @@ func main() {
 		os.Exit(0)
 	}
 
-	// Validate required arguments when not showing version
+	// Show help if no arguments provided
+	if CLI.Input == "" && CLI.Output == "" {
+		ctx.PrintUsage(true)
+		os.Exit(0)
+	}
+
+	// Validate required arguments
 	if CLI.Input == "" || CLI.Output == "" {
 		cli.PrintError("<input> and <output> are required")
 		os.Exit(1)

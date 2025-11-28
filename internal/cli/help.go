@@ -8,33 +8,40 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Custom help styles
+// Custom help styles - fire theme
 var (
+	// Fire colour palette
+	fireYellow  = lipgloss.Color("#FFD700")
+	fireOrange  = lipgloss.Color("#FF8C00")
+	fireRed     = lipgloss.Color("#FF4500")
+	fireCrimson = lipgloss.Color("#DC143C")
+	warmGray    = lipgloss.Color("#B8860B")
+
 	helpTitleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#A40000")).
+			Foreground(fireYellow).
 			MarginBottom(1)
 
 	helpDescStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFA500")).
+			Foreground(fireOrange).
 			Italic(true).
 			MarginBottom(1)
 
 	helpSectionStyle = lipgloss.NewStyle().
 				Bold(true).
-				Foreground(lipgloss.Color("#FFA500")).
+				Foreground(fireOrange).
 				MarginTop(1)
 
 	helpFlagStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#00AA00")).
+			Foreground(fireYellow).
 			Bold(true)
 
 	helpArgStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#00AAAA")).
+			Foreground(fireRed).
 			Bold(true)
 
 	helpDefaultStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#888888")).
+				Foreground(warmGray).
 				Italic(true)
 )
 
@@ -46,7 +53,7 @@ func StyledHelpPrinter(options kong.HelpOptions) kong.HelpPrinter {
 		// Title and description
 		sb.WriteString(helpTitleStyle.Render("Jivefire 🔥"))
 		sb.WriteString("\n")
-		sb.WriteString(helpDescStyle.Render("Spin your podcast .wav into a groovy MP4 visualiser."))
+		sb.WriteString(helpDescStyle.Render("Spin your podcast .wav into a groovy MP4 visualiser with Cava-inspired real-time audio frequencies."))
 		sb.WriteString("\n")
 
 		// Usage
@@ -149,10 +156,19 @@ func getFlags(ctx *kong.Context) []flag {
 			flagStr += "=" + strings.ToUpper(f.PlaceHolder)
 		}
 
+		// Only show default if it's a meaningful value (not empty, not type placeholder)
+		defaultVal := ""
+		if f.HasDefault && !f.IsBool() {
+			val := f.Default
+			if val != "" && val != "STRING" && val != "BOOL" {
+				defaultVal = val
+			}
+		}
+
 		flags = append(flags, flag{
 			flags:      flagStr,
 			help:       f.Help,
-			defaultVal: f.FormatPlaceHolder(),
+			defaultVal: defaultVal,
 		})
 	}
 
