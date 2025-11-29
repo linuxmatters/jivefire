@@ -86,6 +86,7 @@ type RenderComplete struct {
 	TotalTime        time.Duration
 	ThumbnailTime    time.Duration
 	SamplesProcessed int64
+	EncoderName      string // Video encoder used (e.g., "h264_nvenc", "libx264")
 }
 
 // AudioProfile holds the audio analysis results for display
@@ -548,6 +549,9 @@ func (m *Model) renderComplete() string {
 
 	// Output summary
 	s.WriteString(fmt.Sprintf("%s%s\n", dimLabel.Render("Output:   "), m.complete.OutputFile))
+	if m.complete.EncoderName != "" {
+		s.WriteString(fmt.Sprintf("%s%s\n", dimLabel.Render("Encoder:  "), m.complete.EncoderName))
+	}
 
 	videoDuration := time.Duration(m.complete.TotalFrames) * time.Second / 30
 	s.WriteString(fmt.Sprintf("%s%d frames, %.2f fps average\n",

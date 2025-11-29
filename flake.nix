@@ -30,6 +30,19 @@
             mediainfo
             vhs
           ];
+
+          # Make GPU drivers visible for hardware-accelerated encoding (NVENC, etc.)
+          # On NixOS, GPU drivers are mounted under /run/opengl-driver/lib
+          shellHook = ''
+            # If the opengl driver directory exists, prepend it to LD_LIBRARY_PATH
+            if [ -d "/run/opengl-driver/lib" ]; then
+              if [ -z "$LD_LIBRARY_PATH" ]; then
+                export LD_LIBRARY_PATH="/run/opengl-driver/lib"
+              else
+                export LD_LIBRARY_PATH="/run/opengl-driver/lib:$LD_LIBRARY_PATH"
+              fi
+            fi
+          '';
         };
       }
     );

@@ -9,13 +9,16 @@ Jivefire is a Go CLI tool that transforms podcast audio (WAV/MP3/FLAC) into 720p
 - Memory-efficient: ~50MB footprint for 30-minute audio vs 600MB for single-pass
 
 ```
-cmd/jivefire/main.go     → CLI entry, 2-pass coordinator
-internal/audio/          → FFmpegDecoder (AudioDecoder interface), FFT analysis
-internal/encoder/        → ffmpeg-statigo wrapper, RGB→YUV conversion, FIFO buffer
-internal/renderer/       → Frame generation, bar drawing, thumbnail
-internal/ui/             → Bubbletea TUI (unified progress.go for both passes)
-internal/config/         → Constants (dimensions, FFT params, colours)
-third_party/ffmpeg-statigo/  # Git submodule: FFmpeg 8.0 static bindings
+cmd/jivefire/main.go         → CLI entry, 2-pass coordinator
+internal/audio/              → FFmpegDecoder (AudioDecoder interface), FFT analysis
+internal/encoder/            → ffmpeg-statigo wrapper, RGB→YUV conversion, FIFO buffer
+  ├─ encoder.go              → Video/audio encoding, frame submission
+  ├─ hwaccel.go              → Hardware encoder detection (NVENC, QSV, VideoToolbox)
+  └─ frame.go                → RGB→YUV420P parallelised conversion (software path)
+internal/renderer/           → Frame generation, bar drawing, thumbnail
+internal/ui/                 → Bubbletea TUI (unified progress.go for both passes)
+internal/config/             → Constants (dimensions, FFT params, colours)
+third_party/ffmpeg-statigo/  → Git submodule: FFmpeg 8.0 static bindings
 ```
 
 This project uses `ffmpeg-statigo` for FFmpeg 8.0 static bindings, included as a git submodule in `third_party/ffmpeg-statigo`. Key locations within the submodule:

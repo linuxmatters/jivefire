@@ -11,12 +11,13 @@ import (
 
 // Config holds the encoder configuration
 type Config struct {
-	OutputPath    string // Path to output MP4 file
-	Width         int    // Video width in pixels
-	Height        int    // Video height in pixels
-	Framerate     int    // Frames per second
-	SampleRate    int    // Audio sample rate (required for audio encoding)
-	AudioChannels int    // Output audio channels: 1 (mono) or 2 (stereo), defaults to 1
+	OutputPath    string      // Path to output MP4 file
+	Width         int         // Video width in pixels
+	Height        int         // Video height in pixels
+	Framerate     int         // Frames per second
+	SampleRate    int         // Audio sample rate (required for audio encoding)
+	AudioChannels int         // Output audio channels: 1 (mono) or 2 (stereo), defaults to 1
+	HWAccel       HWAccelType // Hardware acceleration type (default: auto-detect)
 }
 
 // AudioFIFO provides a simple FIFO buffer for audio samples
@@ -72,6 +73,13 @@ type Encoder struct {
 	videoStream *ffmpeg.AVStream
 	videoCodec  *ffmpeg.AVCodecContext
 
+	// Hardware acceleration (nil for software encoding)
+	hwEncoder   *HWEncoder
+	hwDeviceCtx *ffmpeg.AVBufferRef
+
+	// Input pixel format (RGBA for NVENC, RGB24 converted to YUV for software)
+	inputPixFmt ffmpeg.AVPixelFormat
+
 	// Audio stream and encoder
 	audioStream   *ffmpeg.AVStream
 	audioCodec    *ffmpeg.AVCodecContext
@@ -123,10 +131,41 @@ func (e *Encoder) Initialize() error {
 		return fmt.Errorf("failed to allocate output context: %d", ret)
 	}
 
-	// Find H.264 encoder
-	codec := ffmpeg.AVCodecFindEncoder(ffmpeg.AVCodecIdH264)
-	if codec == nil {
-		return fmt.Errorf("H.264 encoder not found")
+	// Select encoder based on hardware acceleration preference
+	hwAccelType := e.config.HWAccel
+	if hwAccelType == "" {
+		hwAccelType = HWAccelAuto // Default to auto-detection
+	}
+
+	e.hwEncoder = SelectBestEncoder(hwAccelType)
+
+	var codec *ffmpeg.AVCodec
+	if e.hwEncoder != nil {
+		// Use hardware encoder
+		encoderName := ffmpeg.ToCStr(e.hwEncoder.Name)
+		codec = ffmpeg.AVCodecFindEncoderByName(encoderName)
+		encoderName.Free()
+		if codec == nil {
+			return fmt.Errorf("hardware encoder %s not found", e.hwEncoder.Name)
+		}
+
+		// Create hardware device context
+		ret, err = ffmpeg.AVHWDeviceCtxCreate(&e.hwDeviceCtx, e.hwEncoder.DeviceType, nil, nil, 0)
+		if err != nil || ret < 0 {
+			// Fall back to software if hardware init fails
+			e.hwEncoder = nil
+			e.hwDeviceCtx = nil
+			codec = ffmpeg.AVCodecFindEncoder(ffmpeg.AVCodecIdH264)
+			if codec == nil {
+				return fmt.Errorf("H.264 encoder not found")
+			}
+		}
+	} else {
+		// Use software encoder (libx264)
+		codec = ffmpeg.AVCodecFindEncoder(ffmpeg.AVCodecIdH264)
+		if codec == nil {
+			return fmt.Errorf("H.264 encoder not found")
+		}
 	}
 
 	// Create video stream
@@ -145,7 +184,23 @@ func (e *Encoder) Initialize() error {
 	// Configure video encoder for YouTube compatibility
 	e.videoCodec.SetWidth(e.config.Width)
 	e.videoCodec.SetHeight(e.config.Height)
-	e.videoCodec.SetPixFmt(ffmpeg.AVPixFmtYuv420P) // YouTube-compatible pixel format
+
+	// Set pixel format based on encoder type
+	// NVENC can accept RGBA directly and do colourspace conversion on GPU
+	// Software encoder uses YUV420P (we do RGB→YUV conversion on CPU)
+	if e.hwEncoder != nil && e.hwEncoder.Type == HWAccelNVENC {
+		e.inputPixFmt = ffmpeg.AVPixFmtRgba
+		e.videoCodec.SetPixFmt(ffmpeg.AVPixFmtRgba)
+	} else {
+		e.inputPixFmt = ffmpeg.AVPixFmtYuv420P
+		e.videoCodec.SetPixFmt(ffmpeg.AVPixFmtYuv420P)
+	}
+
+	// Attach hardware device context to codec if using hardware encoding
+	if e.hwDeviceCtx != nil {
+		// Create a new reference to the hw device context for the codec
+		e.videoCodec.SetHwDeviceCtx(ffmpeg.AVBufferRef_(e.hwDeviceCtx))
+	}
 
 	// Set time base (1/framerate)
 	timeBase := ffmpeg.AVMakeQ(1, e.config.Framerate)
@@ -160,25 +215,32 @@ func (e *Encoder) Initialize() error {
 	// Set stream timebase
 	e.videoStream.SetTimeBase(timeBase)
 
-	// Set encoding options optimized for visualization content via dictionary
-	// These are x264-specific private options that must be passed to AVCodecOpen2
+	// Set encoding options based on encoder type
 	var opts *ffmpeg.AVDictionary
 	defer ffmpeg.AVDictFree(&opts)
 
-	// CRF 24 = good quality for busy visualizations
-	ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("crf"), ffmpeg.ToCStr("24"), 0)
-	// Faster preset prioritizes encoding speed
-	ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("preset"), ffmpeg.ToCStr("veryfast"), 0)
-	// Tune for animation content
-	ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("tune"), ffmpeg.ToCStr("animation"), 0)
-	// Main profile for faster encoding and broad compatibility
-	ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("profile"), ffmpeg.ToCStr("main"), 0)
-	// Single reference frame (simple vertical bar motion doesn't need multiple refs)
-	ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("ref"), ffmpeg.ToCStr("1"), 0)
-	// Reduce b-frames for faster encoding (predictable bar motion)
-	ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("bf"), ffmpeg.ToCStr("1"), 0)
-	// Simpler subpixel motion estimation (bars move in discrete pixels)
-	ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("subme"), ffmpeg.ToCStr("4"), 0)
+	if e.hwEncoder != nil {
+		// Hardware encoder options
+		if err := e.setHWEncoderOptions(&opts); err != nil {
+			return fmt.Errorf("failed to set hardware encoder options: %w", err)
+		}
+	} else {
+		// Software encoder (x264) options optimized for visualization content
+		// CRF 24 = good quality for busy visualizations
+		ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("crf"), ffmpeg.ToCStr("24"), 0)
+		// Faster preset prioritizes encoding speed
+		ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("preset"), ffmpeg.ToCStr("veryfast"), 0)
+		// Tune for animation content
+		ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("tune"), ffmpeg.ToCStr("animation"), 0)
+		// Main profile for faster encoding and broad compatibility
+		ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("profile"), ffmpeg.ToCStr("main"), 0)
+		// Single reference frame (simple vertical bar motion doesn't need multiple refs)
+		ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("ref"), ffmpeg.ToCStr("1"), 0)
+		// Reduce b-frames for faster encoding (predictable bar motion)
+		ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("bf"), ffmpeg.ToCStr("1"), 0)
+		// Simpler subpixel motion estimation (bars move in discrete pixels)
+		ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("subme"), ffmpeg.ToCStr("4"), 0)
+	}
 
 	// Open codec with options
 	ret, err = ffmpeg.AVCodecOpen2(e.videoCodec, codec, &opts)
@@ -226,6 +288,71 @@ func (e *Encoder) Initialize() error {
 	}
 
 	return nil
+}
+
+// setHWEncoderOptions configures encoder-specific options for hardware encoders
+func (e *Encoder) setHWEncoderOptions(opts **ffmpeg.AVDictionary) error {
+	if e.hwEncoder == nil {
+		return nil
+	}
+
+	switch e.hwEncoder.Type {
+	case HWAccelNVENC:
+		// NVENC options optimized for visualization content
+		// Preset p4 = balanced quality/speed (p1=fastest, p7=slowest)
+		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("preset"), ffmpeg.ToCStr("p4"), 0)
+		// Tune for high quality
+		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("tune"), ffmpeg.ToCStr("hq"), 0)
+		// Target quality (CQ mode) - similar to CRF, lower=better (0-51)
+		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("rc"), ffmpeg.ToCStr("vbr"), 0)
+		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("cq"), ffmpeg.ToCStr("24"), 0)
+		// Main profile for broad compatibility
+		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("profile"), ffmpeg.ToCStr("main"), 0)
+		// B-frames for better compression
+		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("bf"), ffmpeg.ToCStr("2"), 0)
+		// Lookahead for better rate control
+		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("rc-lookahead"), ffmpeg.ToCStr("20"), 0)
+
+	case HWAccelQSV:
+		// Intel Quick Sync Video options
+		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("preset"), ffmpeg.ToCStr("medium"), 0)
+		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("global_quality"), ffmpeg.ToCStr("24"), 0)
+		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("profile"), ffmpeg.ToCStr("main"), 0)
+
+	case HWAccelVulkan:
+		// Vulkan Video options (limited configuration available)
+		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("profile"), ffmpeg.ToCStr("main"), 0)
+
+	case HWAccelVideoToolbox:
+		// Apple VideoToolbox options
+		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("profile"), ffmpeg.ToCStr("main"), 0)
+		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("level"), ffmpeg.ToCStr("4.1"), 0)
+		// Allow hardware frame types
+		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("allow_sw"), ffmpeg.ToCStr("0"), 0)
+	}
+
+	return nil
+}
+
+// EncoderName returns the name of the video encoder being used
+func (e *Encoder) EncoderName() string {
+	if e.hwEncoder != nil {
+		return e.hwEncoder.Name
+	}
+	return "libx264"
+}
+
+// EncoderDescription returns a human-readable description of the encoder
+func (e *Encoder) EncoderDescription() string {
+	if e.hwEncoder != nil {
+		return e.hwEncoder.Description
+	}
+	return "Software (libx264)"
+}
+
+// IsHardwareAccelerated returns true if using hardware encoding
+func (e *Encoder) IsHardwareAccelerated() bool {
+	return e.hwEncoder != nil
 }
 
 // initializeAudioEncoder sets up the AAC encoder for direct sample input.
@@ -313,7 +440,8 @@ func (e *Encoder) initializeAudioEncoder() error {
 }
 
 // WriteFrameRGBA encodes and writes a single RGBA frame
-// Converts RGBA (4 bytes/pixel) to RGB24 (3 bytes/pixel) then encodes
+// For NVENC: sends RGBA directly to GPU (colourspace conversion on GPU)
+// For software: converts to RGB24→YUV420P on CPU then encodes
 func (e *Encoder) WriteFrameRGBA(rgbaData []byte) error {
 	// Validate frame size
 	expectedSize := e.config.Width * e.config.Height * 4 // RGBA = 4 bytes per pixel
@@ -321,7 +449,12 @@ func (e *Encoder) WriteFrameRGBA(rgbaData []byte) error {
 		return fmt.Errorf("invalid RGBA frame size: got %d, expected %d", len(rgbaData), expectedSize)
 	}
 
-	// Convert RGBA to RGB24 (strip alpha channel)
+	// For NVENC, send RGBA directly - GPU does colourspace conversion
+	if e.inputPixFmt == ffmpeg.AVPixFmtRgba {
+		return e.writeFrameRGBADirect(rgbaData)
+	}
+
+	// For software encoder, convert RGBA to RGB24 then to YUV420P
 	rgb24Size := e.config.Width * e.config.Height * 3
 	rgb24Data := make([]byte, rgb24Size)
 
@@ -336,8 +469,62 @@ func (e *Encoder) WriteFrameRGBA(rgbaData []byte) error {
 		dstIdx += 3
 	}
 
-	// Use existing RGB24 encoding path
+	// Use existing RGB24→YUV encoding path
 	return e.WriteFrame(rgb24Data)
+}
+
+// writeFrameRGBADirect sends RGBA frame directly to hardware encoder
+// This avoids CPU-side colourspace conversion - GPU handles it
+func (e *Encoder) writeFrameRGBADirect(rgbaData []byte) error {
+	// Allocate RGBA frame
+	rgbaFrame := ffmpeg.AVFrameAlloc()
+	if rgbaFrame == nil {
+		return fmt.Errorf("failed to allocate RGBA frame")
+	}
+	defer ffmpeg.AVFrameFree(&rgbaFrame)
+
+	rgbaFrame.SetWidth(e.config.Width)
+	rgbaFrame.SetHeight(e.config.Height)
+	rgbaFrame.SetFormat(int(ffmpeg.AVPixFmtRgba))
+
+	ret, err := ffmpeg.AVFrameGetBuffer(rgbaFrame, 0)
+	if err != nil {
+		return fmt.Errorf("failed to allocate RGBA buffer: %w", err)
+	}
+	if ret < 0 {
+		return fmt.Errorf("failed to allocate RGBA buffer: %d", ret)
+	}
+
+	// Copy RGBA data to frame
+	width := e.config.Width
+	height := e.config.Height
+	linesize := rgbaFrame.Linesize().Get(0)
+	data := rgbaFrame.Data().Get(0)
+
+	// Copy row by row (frame may have padding)
+	srcStride := width * 4
+	for y := 0; y < height; y++ {
+		srcOffset := y * srcStride
+		dstOffset := y * linesize
+		copy(unsafe.Slice((*byte)(unsafe.Pointer(uintptr(unsafe.Pointer(data))+uintptr(dstOffset))), srcStride),
+			rgbaData[srcOffset:srcOffset+srcStride])
+	}
+
+	// Set presentation timestamp
+	rgbaFrame.SetPts(e.nextVideoPts)
+	e.nextVideoPts++
+
+	// Send frame to encoder
+	ret, err = ffmpeg.AVCodecSendFrame(e.videoCodec, rgbaFrame)
+	if err != nil {
+		return fmt.Errorf("failed to send frame to encoder: %w", err)
+	}
+	if ret < 0 {
+		return fmt.Errorf("failed to send frame to encoder: %d", ret)
+	}
+
+	// Receive and write encoded packets
+	return e.receiveAndWriteVideoPackets()
 }
 
 // WriteFrame encodes and writes a single RGB frame
@@ -386,6 +573,40 @@ func (e *Encoder) WriteFrame(rgbData []byte) error {
 	}
 
 	// Receive and write encoded packets
+	for {
+		pkt := ffmpeg.AVPacketAlloc()
+
+		ret, err := ffmpeg.AVCodecReceivePacket(e.videoCodec, pkt)
+		if err != nil || errors.Is(err, ffmpeg.EAgain) || errors.Is(err, ffmpeg.AVErrorEOF) {
+			ffmpeg.AVPacketFree(&pkt)
+			break
+		}
+		if ret < 0 {
+			ffmpeg.AVPacketFree(&pkt)
+			return fmt.Errorf("failed to receive packet: %d", ret)
+		}
+
+		// Set stream index and rescale timestamps
+		pkt.SetStreamIndex(e.videoStream.Index())
+		ffmpeg.AVPacketRescaleTs(pkt, e.videoCodec.TimeBase(), e.videoStream.TimeBase())
+
+		// Write packet to output
+		ret, err = ffmpeg.AVInterleavedWriteFrame(e.formatCtx, pkt)
+		ffmpeg.AVPacketFree(&pkt)
+
+		if err != nil {
+			return fmt.Errorf("failed to write packet: %w", err)
+		}
+		if ret < 0 {
+			return fmt.Errorf("failed to write packet: %d", ret)
+		}
+	}
+
+	return nil
+}
+
+// receiveAndWriteVideoPackets receives encoded packets from video codec and writes to output
+func (e *Encoder) receiveAndWriteVideoPackets() error {
 	for {
 		pkt := ffmpeg.AVPacketAlloc()
 
@@ -906,6 +1127,12 @@ func (e *Encoder) Close() error {
 	// Free audio resources
 	if e.audioEncFrame != nil {
 		ffmpeg.AVFrameFree(&e.audioEncFrame)
+	}
+
+	// Free hardware device context
+	if e.hwDeviceCtx != nil {
+		ffmpeg.AVBufferUnref(&e.hwDeviceCtx)
+		e.hwDeviceCtx = nil
 	}
 
 	// Free format context

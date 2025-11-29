@@ -61,14 +61,21 @@ Frame Renderer (image/draw + custom optimizations)
     ├─ Pre-computed alpha tables for gradients
     └─ RGB24 pixel buffer (1280×720)
     ↓
-RGB → YUV420P Conversion (Pure Go, parallelised)
-    ├─ 8.4× faster than FFmpeg swscale
-    ├─ Parallel row processing across CPU cores
-    └─ Standard ITU-R BT.601 coefficients
+Colourspace Conversion (path depends on encoder)
+    │
+    ├─ [Software] RGB → YUV420P (Pure Go, parallelised)
+    │   ├─ 8.4× faster than FFmpeg swscale
+    │   ├─ Parallel row processing across CPU cores
+    │   └─ Standard ITU-R BT.601 coefficients
+    │
+    └─ [Hardware] RGBA → GPU (direct upload)
+        └─ Colourspace conversion on GPU
     ↓
-ffmpeg-statigo H.264 Encoder (libx264)
-    ├─ 30fps video stream
-    └─ yuv420p pixel format
+H.264 Encoder (auto-selected)
+    ├─ NVENC (NVIDIA GPU) - 15× realtime, RGBA input
+    ├─ Quick Sync (Intel iGPU) - hardware accelerated
+    ├─ VideoToolbox (macOS) - Apple Silicon/Intel
+    └─ libx264 (software fallback) - YUV420P input
     ↓
 ffmpeg-statigo AAC Encoder
     ├─ Receives pre-decoded samples via WriteAudioSamples()
@@ -87,7 +94,16 @@ MP4 Muxer (libavformat)
 ### Audio Frame Size Mismatch
 FFT analysis requires 2048 samples for frequency resolution, but AAC encoder expects 1024 samples per frame. **Solution:** `SharedAudioBuffer` in `audio/shared_buffer.go` provides thread-safe multi-consumer access with independent read positions—FFT and encoder each consume at their own rate without blocking each other.
 
-### RGB → YUV Conversion
+### Hardware-Accelerated Encoding
+Automatic GPU encoder detection in `encoder/hwaccel.go`:
+- **NVENC** (NVIDIA): Sends RGBA frames directly to GPU—colourspace conversion happens on GPU, not CPU
+- **Quick Sync** (Intel): Hardware-accelerated H.264 encoding via Intel iGPU
+- **VideoToolbox** (macOS): Apple Silicon and Intel Mac hardware encoding
+- **Software fallback**: Optimised libx264 with `veryfast` preset when no GPU available
+
+**Why RGBA for NVENC?** Initial implementation used CPU-side RGB→YUV conversion for all encoders. Benchmarking showed NVENC was no faster than libx264 due to CPU conversion overhead. Sending RGBA directly to NVENC (which accepts it natively) lets the GPU handle colourspace conversion, achieving **15× realtime** encoding (vs 10× for software).
+
+### RGB → YUV Conversion (Software Path)
 Custom parallelised RGB→YUV420P converter in `encoder/frame.go`:
 - Processes image rows in parallel across CPU cores
 - Uses Go's standard ITU-R BT.601 coefficients
@@ -119,12 +135,16 @@ Preview renders via Unicode blocks (`▁▂▃▄▅▆▇█`) using actual bar
 ## File Structure
 
 ```
-cmd/jivefire/main.go     → CLI entry, 2-pass coordinator
-internal/audio/          → FFmpegDecoder (AudioDecoder interface), FFT analysis
-internal/encoder/        → ffmpeg-statigo wrapper, RGB→YUV conversion, FIFO buffer
-internal/renderer/       → Frame generation, bar drawing, thumbnail
-internal/ui/             → Bubbletea TUI (unified progress.go for both passes)
-internal/config/         → Constants (dimensions, FFT params, colours)
+cmd/jivefire/main.go         → CLI entry, 2-pass coordinator
+internal/audio/              → FFmpegDecoder (AudioDecoder interface), FFT analysis
+internal/encoder/            → ffmpeg-statigo wrapper, RGB→YUV conversion, FIFO buffer
+  ├─ encoder.go              → Video/audio encoding, frame submission
+  ├─ hwaccel.go              → Hardware encoder detection (NVENC, QSV, VideoToolbox)
+  └─ frame.go                → RGB→YUV420P parallelised conversion (software path)
+internal/renderer/           → Frame generation, bar drawing, thumbnail
+internal/ui/                 → Bubbletea TUI (unified progress.go for both passes)
+internal/config/             → Constants (dimensions, FFT params, colours)
+third_party/ffmpeg-statigo/  → Git submodule: FFmpeg 8.0 static bindings
 ```
 
 ---

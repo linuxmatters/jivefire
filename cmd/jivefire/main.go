@@ -35,6 +35,7 @@ var CLI struct {
 	BackgroundImage string `help:"Path to custom background image (PNG, 1280x720)"`
 	ThumbnailImage  string `help:"Path to custom thumbnail image (PNG, 1280x720)"`
 	NoPreview       bool   `help:"Disable video preview during encoding"`
+	Encoder         string `help:"Video encoder: auto, nvenc, qsv, software" default:"auto"`
 	Version         bool   `help:"Show version information"`
 }
 
@@ -74,6 +75,19 @@ func main() {
 	// Validate channels
 	if CLI.Channels != 1 && CLI.Channels != 2 {
 		cli.PrintError(fmt.Sprintf("invalid channels value: %d (must be 1 or 2)", CLI.Channels))
+		os.Exit(1)
+	}
+
+	// Validate encoder option
+	validEncoders := map[string]encoder.HWAccelType{
+		"auto":     encoder.HWAccelAuto,
+		"nvenc":    encoder.HWAccelNVENC,
+		"qsv":      encoder.HWAccelQSV,
+		"software": encoder.HWAccelNone,
+	}
+	hwAccelType, ok := validEncoders[CLI.Encoder]
+	if !ok {
+		cli.PrintError(fmt.Sprintf("invalid --encoder value: %s (must be auto, nvenc, qsv, or software)", CLI.Encoder))
 		os.Exit(1)
 	}
 
@@ -130,10 +144,10 @@ func main() {
 	_ = ctx // Kong context available for future use
 
 	// Generate video using 2-pass streaming approach
-	generateVideo(inputFile, outputFile, channels, noPreview, runtimeConfig)
+	generateVideo(inputFile, outputFile, channels, noPreview, hwAccelType, runtimeConfig)
 }
 
-func generateVideo(inputFile string, outputFile string, channels int, noPreview bool, runtimeConfig *config.RuntimeConfig) {
+func generateVideo(inputFile string, outputFile string, channels int, noPreview bool, hwAccel encoder.HWAccelType, runtimeConfig *config.RuntimeConfig) {
 	// Track overall timing from the very start
 	overallStartTime := time.Now()
 
@@ -199,7 +213,7 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 		})
 
 		// === PASS 2: Rendering & Encoding ===
-		runPass2(p, inputFile, outputFile, channels, noPreview, runtimeConfig, profile, thumbnailDuration, overallStartTime)
+		runPass2(p, inputFile, outputFile, channels, noPreview, hwAccel, runtimeConfig, profile, thumbnailDuration, overallStartTime)
 	}()
 
 	// Run the unified Bubbletea UI
@@ -215,7 +229,7 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 	}
 }
 
-func runPass2(p *tea.Program, inputFile string, outputFile string, channels int, noPreview bool, runtimeConfig *config.RuntimeConfig, profile *audio.AudioProfile, thumbnailDuration time.Duration, overallStartTime time.Time) {
+func runPass2(p *tea.Program, inputFile string, outputFile string, channels int, noPreview bool, hwAccel encoder.HWAccelType, runtimeConfig *config.RuntimeConfig, profile *audio.AudioProfile, thumbnailDuration time.Duration, overallStartTime time.Time) {
 	// Open streaming reader for Pass 2
 	reader, err := audio.NewStreamingReader(inputFile)
 	if err != nil {
@@ -233,6 +247,7 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 		Framerate:     config.FPS,
 		SampleRate:    reader.SampleRate(), // Use sample rate from audio file
 		AudioChannels: channels,            // Mono (1) or stereo (2)
+		HWAccel:       hwAccel,             // Hardware acceleration type
 	})
 	if err != nil {
 		cli.PrintError(fmt.Sprintf("creating encoder: %v", err))
@@ -578,5 +593,6 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 		TotalTime:        overallTotalTime,
 		ThumbnailTime:    thumbnailDuration,
 		SamplesProcessed: samplesProcessed,
+		EncoderName:      enc.EncoderName(),
 	})
 }
