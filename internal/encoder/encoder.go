@@ -341,20 +341,20 @@ func (e *Encoder) setHWEncoderOptions(opts **ffmpeg.AVDictionary) error {
 
 	switch e.hwEncoder.Type {
 	case HWAccelNVENC:
-		// NVENC options optimized for visualization content
-		// Preset p4 = balanced quality/speed (p1=fastest, p7=slowest)
-		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("preset"), ffmpeg.ToCStr("p4"), 0)
-		// Tune for high quality
-		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("tune"), ffmpeg.ToCStr("hq"), 0)
+		// NVENC options optimized for fast visualisation encoding
+		// Preset p2 = faster encoding with acceptable quality (p1=fastest, p7=slowest)
+		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("preset"), ffmpeg.ToCStr("p1"), 0)
+		// Low latency tuning - reduces pipeline delay
+		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("tune"), ffmpeg.ToCStr("ull"), 0)
 		// Target quality (CQ mode) - similar to CRF, lower=better (0-51)
 		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("rc"), ffmpeg.ToCStr("vbr"), 0)
 		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("cq"), ffmpeg.ToCStr("24"), 0)
 		// Main profile for broad compatibility
 		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("profile"), ffmpeg.ToCStr("main"), 0)
-		// B-frames for better compression
-		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("bf"), ffmpeg.ToCStr("2"), 0)
-		// Lookahead for better rate control
-		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("rc-lookahead"), ffmpeg.ToCStr("20"), 0)
+		// No B-frames for faster encoding (visualisation has low motion)
+		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("bf"), ffmpeg.ToCStr("0"), 0)
+		// Zero latency mode - no reordering delay
+		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("zerolatency"), ffmpeg.ToCStr("1"), 0)
 
 	case HWAccelQSV:
 		// Intel Quick Sync Video options
@@ -363,10 +363,18 @@ func (e *Encoder) setHWEncoderOptions(opts **ffmpeg.AVDictionary) error {
 		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("profile"), ffmpeg.ToCStr("main"), 0)
 
 	case HWAccelVulkan:
-		// Vulkan Video options for h264_vulkan
-		// Note: Many options from ffmpeg -h encoder=h264_vulkan may not be supported
-		// by all drivers. Start minimal and add options carefully.
+		// Vulkan Video options optimized for fast visualisation encoding
+		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("content"), ffmpeg.ToCStr("rendered"), 0)
+		// Quality level (0-51, lower=better) - same as NVENC CQ
 		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("qp"), ffmpeg.ToCStr("24"), 0)
+		// Low latency tuning - reduces pipeline delay
+		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("tune"), ffmpeg.ToCStr("ull"), 0)
+		// Increase async depth for more parallelism (default=2)
+		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("async_depth"), ffmpeg.ToCStr("4"), 0)
+		// Main profile for broad compatibility
+		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("profile"), ffmpeg.ToCStr("main"), 0)
+		// Minimal B-frame depth (1 is minimum)
+		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("b_depth"), ffmpeg.ToCStr("1"), 0)
 
 	case HWAccelVideoToolbox:
 		// Apple VideoToolbox options
