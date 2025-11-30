@@ -333,8 +333,10 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 	numFrames := profile.NumFrames
 
 	// Profiling variables
-	var totalFFT, totalBin, totalDraw, totalWrite time.Duration
+	var totalVis, totalEncode, totalAudio time.Duration
 	renderStartTime := time.Now()
+	lastProgressUpdate := renderStartTime
+	const progressUpdateInterval = 30 * time.Millisecond
 
 	// Get audio format information for codec display
 	audioSampleRate := reader.SampleRate()
@@ -413,15 +415,14 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 		// Use current buffer for FFT
 		chunk := fftBuffer[:config.FFTSize]
 
-		// Compute FFT
+		// === VISUALISATION TIMING START ===
 		t0 := time.Now()
+
+		// Compute FFT
 		coeffs := processor.ProcessChunk(chunk)
-		totalFFT += time.Since(t0)
 
 		// Compute magnitudes and bin into bars using optimal baseScale from Pass 1
-		t0 = time.Now()
 		audio.BinFFT(coeffs, sensitivity, profile.OptimalBaseScale, barHeights)
-		totalBin += time.Since(t0)
 
 		// CAVA-style auto-sensitivity with soft knee compression
 		const overshootThreshold = 1.0
@@ -493,11 +494,11 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 		audio.RearrangeFrequenciesCenterOut(prevBarHeights, rearrangedHeights)
 
 		// Generate frame image
-		t0 = time.Now()
 		frame.Draw(rearrangedHeights)
-		totalDraw += time.Since(t0)
+		totalVis += time.Since(t0)
+		// === VISUALISATION TIMING END ===
 
-		// Encode frame directly
+		// === VIDEO ENCODING TIMING START ===
 		t0 = time.Now()
 		img := frame.GetImage()
 		if err := enc.WriteFrameRGBA(img.Pix); err != nil {
@@ -505,17 +506,12 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 			p.Quit()
 			return
 		}
-		totalWrite += time.Since(t0)
+		totalEncode += time.Since(t0)
+		// === VIDEO ENCODING TIMING END ===
 
-		// Send progress update every 3 frames
-		// Send frame data for preview every 6 frames (5Hz at 30fps - good balance)
-		// Skip frame data entirely if preview is disabled for better batch performance
-		var frameData *image.RGBA
-		if !noPreview && frameNum%6 == 0 {
-			frameData = img
-		}
-
-		if frameNum%3 == 0 {
+		// Time-based UI updates (10Hz) - minimal overhead, not timed
+		if time.Since(lastProgressUpdate) >= progressUpdateInterval {
+			lastProgressUpdate = time.Now()
 			elapsed := time.Since(renderStartTime)
 
 			// Copy bar heights for UI (use rearranged for better visual)
@@ -528,6 +524,12 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 				currentFileSize = fileInfo.Size()
 			}
 
+			// Include frame data for preview (skip if disabled)
+			var frameData *image.RGBA
+			if !noPreview {
+				frameData = img
+			}
+
 			p.Send(ui.RenderProgress{
 				Frame:       frameNum + 1,
 				TotalFrames: numFrames,
@@ -535,7 +537,7 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 				BarHeights:  barHeightsCopy,
 				FileSize:    currentFileSize,
 				Sensitivity: sensitivity,
-				FrameData:   frameData, // Send frame every 6 frames for preview
+				FrameData:   frameData,
 				VideoCodec:  fmt.Sprintf("H.264 %d×%d", config.Width, config.Height),
 				AudioCodec:  audioCodecInfo,
 			})
@@ -544,8 +546,9 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 		// Advance to next frame
 		frameNum++
 
-		// Advance sliding buffer for next frame
-		// Keep reading until we get the requested number of samples or EOF
+		// === AUDIO TIMING START ===
+		// Read audio, encode, and manage buffer for next frame
+		t0 = time.Now()
 		newSamples := make([]float64, 0, samplesPerFrame)
 		for len(newSamples) < samplesPerFrame {
 			chunk, err := reader.ReadChunk(samplesPerFrame - len(newSamples))
@@ -569,6 +572,7 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 
 		// If we got no new samples, we're done
 		if len(newSamples) == 0 {
+			totalAudio += time.Since(t0)
 			break
 		}
 
@@ -583,7 +587,6 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 			p.Quit()
 			return
 		}
-
 		// Shift buffer left by samplesPerFrame, append new samples
 		copy(fftBuffer, fftBuffer[samplesPerFrame:])
 		// Pad with zeros if we got fewer samples than expected
@@ -596,10 +599,13 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 		} else {
 			copy(fftBuffer[config.FFTSize-samplesPerFrame:], newSamples)
 		}
+		totalAudio += time.Since(t0)
+		// === AUDIO TIMING END ===
 	}
 
 	// Flush any remaining audio after all video frames are written
 	// This encodes any samples remaining in the FIFO and flushes the encoder
+	finalizeStart := time.Now()
 	if err := enc.FlushAudioEncoder(); err != nil {
 		cli.PrintError(fmt.Sprintf("error flushing audio: %v", err))
 		p.Quit()
@@ -612,6 +618,7 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 		p.Quit()
 		return
 	}
+	totalFinalize := time.Since(finalizeStart)
 
 	// Calculate total time (from Pass 2 render start, not including Pass 1)
 	totalTime := time.Since(renderStartTime)
@@ -635,10 +642,10 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 		Duration:         totalTime,
 		FileSize:         actualFileSize,
 		TotalFrames:      numFrames,
-		FFTTime:          totalFFT,
-		BinTime:          totalBin,
-		DrawTime:         totalDraw,
-		EncodeTime:       totalWrite,
+		VisTime:          totalVis,
+		EncodeTime:       totalEncode,
+		AudioTime:        totalAudio,
+		FinalizeTime:     totalFinalize,
 		TotalTime:        overallTotalTime,
 		ThumbnailTime:    thumbnailDuration,
 		SamplesProcessed: samplesProcessed,

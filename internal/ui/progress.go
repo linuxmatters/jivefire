@@ -79,10 +79,10 @@ type RenderComplete struct {
 	Duration         time.Duration
 	FileSize         int64
 	TotalFrames      int
-	FFTTime          time.Duration
-	BinTime          time.Duration
-	DrawTime         time.Duration
-	EncodeTime       time.Duration
+	VisTime          time.Duration // Visualisation: FFT + binning + drawing
+	EncodeTime       time.Duration // Video encoding time
+	AudioTime        time.Duration // Audio reading + encoding time
+	FinalizeTime     time.Duration // Encoder finalization (flush + close)
 	TotalTime        time.Duration
 	ThumbnailTime    time.Duration
 	SamplesProcessed int64
@@ -564,48 +564,51 @@ func (m *Model) renderComplete() string {
 	}
 
 	if m.complete.ThumbnailTime > 0 {
-		s.WriteString(fmt.Sprintf("  %s%s (%2d%%)  %s\n",
+		s.WriteString(fmt.Sprintf("  %s%s (~%2d%%)  %s\n",
 			labelStyle.Render(fmt.Sprintf("%-18s", "Thumbnail:")),
-			valueStyle.Render(fmt.Sprintf("%-6s", formatDuration(m.complete.ThumbnailTime))),
+			valueStyle.Render(fmt.Sprintf("~%-6s", formatDuration(m.complete.ThumbnailTime))),
 			int(float64(m.complete.ThumbnailTime.Milliseconds())*100/float64(totalMs)),
 			m.summaryBar.ViewAs(float64(m.complete.ThumbnailTime.Milliseconds())/float64(totalMs))))
 	}
 
-	s.WriteString(fmt.Sprintf("  %s%s (%2d%%)  %s\n",
-		labelStyle.Render(fmt.Sprintf("%-18s", "FFT computation:")),
-		valueStyle.Render(fmt.Sprintf("%-6s", formatDuration(m.complete.FFTTime))),
-		int(float64(m.complete.FFTTime.Milliseconds())*100/float64(totalMs)),
-		m.summaryBar.ViewAs(float64(m.complete.FFTTime.Milliseconds())/float64(totalMs))))
+	s.WriteString(fmt.Sprintf("  %s%s (~%2d%%)  %s\n",
+		labelStyle.Render(fmt.Sprintf("%-18s", "Visualisation:")),
+		valueStyle.Render(fmt.Sprintf("~%-6s", formatDuration(m.complete.VisTime))),
+		int(float64(m.complete.VisTime.Milliseconds())*100/float64(totalMs)),
+		m.summaryBar.ViewAs(float64(m.complete.VisTime.Milliseconds())/float64(totalMs))))
 
-	s.WriteString(fmt.Sprintf("  %s%s (%2d%%)  %s\n",
-		labelStyle.Render(fmt.Sprintf("%-18s", "Bar binning:")),
-		valueStyle.Render(fmt.Sprintf("%-6s", formatDuration(m.complete.BinTime))),
-		int(float64(m.complete.BinTime.Milliseconds())*100/float64(totalMs)),
-		m.summaryBar.ViewAs(float64(m.complete.BinTime.Milliseconds())/float64(totalMs))))
-
-	s.WriteString(fmt.Sprintf("  %s%s (%2d%%)  %s\n",
-		labelStyle.Render(fmt.Sprintf("%-18s", "Rendering:")),
-		valueStyle.Render(fmt.Sprintf("%-6s", formatDuration(m.complete.DrawTime))),
-		int(float64(m.complete.DrawTime.Milliseconds())*100/float64(totalMs)),
-		m.summaryBar.ViewAs(float64(m.complete.DrawTime.Milliseconds())/float64(totalMs))))
-
-	s.WriteString(fmt.Sprintf("  %s%s (%2d%%)  %s\n",
+	s.WriteString(fmt.Sprintf("  %s%s (~%2d%%)  %s\n",
 		labelStyle.Render(fmt.Sprintf("%-18s", "Video encoding:")),
-		valueStyle.Render(fmt.Sprintf("%-6s", formatDuration(m.complete.EncodeTime))),
+		valueStyle.Render(fmt.Sprintf("~%-6s", formatDuration(m.complete.EncodeTime))),
 		int(float64(m.complete.EncodeTime.Milliseconds())*100/float64(totalMs)),
 		m.summaryBar.ViewAs(float64(m.complete.EncodeTime.Milliseconds())/float64(totalMs))))
 
-	// Calculate "other" time
-	accountedTime := m.complete.ThumbnailTime + m.complete.FFTTime + m.complete.BinTime +
-		m.complete.DrawTime + m.complete.EncodeTime
-	if m.audioProfile != nil {
-		accountedTime += m.audioProfile.AnalysisTime
+	if m.complete.AudioTime > 0 {
+		s.WriteString(fmt.Sprintf("  %s%s (~%2d%%)  %s\n",
+			labelStyle.Render(fmt.Sprintf("%-18s", "Audio encoding:")),
+			valueStyle.Render(fmt.Sprintf("~%-6s", formatDuration(m.complete.AudioTime))),
+			int(float64(m.complete.AudioTime.Milliseconds())*100/float64(totalMs)),
+			m.summaryBar.ViewAs(float64(m.complete.AudioTime.Milliseconds())/float64(totalMs))))
 	}
+
+	// Calculate unaccounted time including finalisation (Pass 2 only)
+	// Roll finalisation into runtime/pipeline since it's typically small
+	accountedTime := m.complete.ThumbnailTime + m.complete.VisTime +
+		m.complete.EncodeTime + m.complete.AudioTime
 	otherTime := m.complete.TotalTime - accountedTime
 	if otherTime > 0 {
-		s.WriteString(fmt.Sprintf("  %s%s (%2d%%)  %s\n",
-			labelStyle.Render(fmt.Sprintf("%-18s", "Other:")),
-			valueStyle.Render(fmt.Sprintf("%-6s", formatDuration(otherTime))),
+		// Label based on encoder type: hardware encoders have GPU pipeline overhead,
+		// software encoder has Go runtime/GC overhead
+		otherLabel := "Runtime:"
+		if strings.Contains(m.complete.EncoderName, "nvenc") ||
+			strings.Contains(m.complete.EncoderName, "vulkan") ||
+			strings.Contains(m.complete.EncoderName, "qsv") ||
+			strings.Contains(m.complete.EncoderName, "videotoolbox") {
+			otherLabel = "GPU pipeline:"
+		}
+		s.WriteString(fmt.Sprintf("  %s%s (~%2d%%)  %s\n",
+			labelStyle.Render(fmt.Sprintf("%-18s", otherLabel)),
+			valueStyle.Render(fmt.Sprintf("~%-6s", formatDuration(otherTime))),
 			int(float64(otherTime.Milliseconds())*100/float64(totalMs)),
 			m.summaryBar.ViewAs(float64(otherTime.Milliseconds())/float64(totalMs))))
 	}
