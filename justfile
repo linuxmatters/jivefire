@@ -108,13 +108,54 @@ install: build
     @echo "Installed jivefire to ~/.local/bin/jivefire"
     @echo "Make sure ~/.local/bin is in your PATH"
 
-# Benchmark RGB→YUV
-benchmark:
+# Benchmark RGB→YUV conversion
+bench-yuv:
     @go test -v ./internal/encoder/ -run=TestBenchmarkSummary
 
 # Benchmark RGB→YUV with iterations
-benchmark-full:
+bench-yuv-full:
     go test -bench=. -benchmem ./internal/encoder/ -run='^$$'
+
+# Benchmark video encoders (NVENC vs Vulkan vs Software)
+bench-encoders: build
+    #!/usr/bin/env bash
+    set -e
+
+    # Check hyperfine is installed
+    if ! command -v hyperfine &> /dev/null; then
+        echo "Error: hyperfine not found. Install it with your package manager."
+        exit 1
+    fi
+
+    INPUT="testdata/LMP0.mp3"
+    if [ ! -f "$INPUT" ]; then
+        echo "Error: Test file $INPUT not found"
+        exit 1
+    fi
+
+    # Clean up any previous benchmark outputs
+    rm -f testdata/bench-*.mp4
+
+    echo "Benchmarking video encoders with hyperfine..."
+    echo "Input: $INPUT"
+    echo ""
+
+    hyperfine \
+        --warmup 1 \
+        --runs 3 \
+        --export-markdown testdata/bench-encoders.md \
+        --command-name "Software (libx264)" \
+            "./jivefire --no-preview --encoder=software '$INPUT' testdata/bench-software.mp4" \
+        --command-name "Vulkan (h264_vulkan)" \
+            "./jivefire --no-preview --encoder=vulkan '$INPUT' testdata/bench-vulkan.mp4" \
+        --command-name "NVENC (h264_nvenc)" \
+            "./jivefire --no-preview --encoder=nvenc '$INPUT' testdata/bench-nvenc.mp4"
+
+    echo ""
+    echo "Results saved to testdata/bench-encoders.md"
+
+    # Clean up benchmark outputs
+    rm -f testdata/bench-*.mp4
 
 # Record gif
 vhs: build

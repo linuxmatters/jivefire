@@ -35,7 +35,7 @@ var CLI struct {
 	BackgroundImage string `help:"Path to custom background image (PNG, 1280x720)"`
 	ThumbnailImage  string `help:"Path to custom thumbnail image (PNG, 1280x720)"`
 	NoPreview       bool   `help:"Disable video preview during encoding"`
-	Encoder         string `help:"Video encoder: auto, nvenc, qsv, software" default:"auto"`
+	Encoder         string `help:"Video encoder: auto, nvenc, qsv, vulkan, software" default:"auto"`
 	Version         bool   `help:"Show version information"`
 }
 
@@ -83,11 +83,12 @@ func main() {
 		"auto":     encoder.HWAccelAuto,
 		"nvenc":    encoder.HWAccelNVENC,
 		"qsv":      encoder.HWAccelQSV,
+		"vulkan":   encoder.HWAccelVulkan,
 		"software": encoder.HWAccelNone,
 	}
 	hwAccelType, ok := validEncoders[CLI.Encoder]
 	if !ok {
-		cli.PrintError(fmt.Sprintf("invalid --encoder value: %s (must be auto, nvenc, qsv, or software)", CLI.Encoder))
+		cli.PrintError(fmt.Sprintf("invalid --encoder value: %s (must be auto, nvenc, qsv, vulkan, or software)", CLI.Encoder))
 		os.Exit(1)
 	}
 

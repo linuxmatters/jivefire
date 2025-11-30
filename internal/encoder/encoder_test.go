@@ -16,6 +16,7 @@ func TestEncoderPOC(t *testing.T) {
 		Width:      1280,
 		Height:     720,
 		Framerate:  30,
+		HWAccel:    HWAccelNone, // Force software encoding for WriteFrame (RGB24→YUV420P)
 	}
 
 	enc, err := New(config)
