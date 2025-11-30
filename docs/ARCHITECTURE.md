@@ -7,7 +7,7 @@
 ## Core Design Principles
 
 ### 1. **Single Binary Distribution**
-Uses [ffmpeg-statigo](https://github.com/linuxmatters/ffmpeg-statigo) with embedded static FFmpeg 8.0 libraries (~100MB per platform). No external FFmpeg installation required. Ships for Linux/macOS on amd64/arm64. Hardware acceleration support for NVENC, QuickSync, VideoToolbox, and Vulkan Video.
+Uses [ffmpeg-statigo](https://github.com/linuxmatters/ffmpeg-statigo) with embedded static FFmpeg 8.0 libraries (~100MB per platform). No external FFmpeg installation required. Ships for Linux/macOS on amd64/arm64. Hardware acceleration support for NVENC, QuickSync (WIP), VideoToolbox (WIP), and Vulkan Video.
 
 **Why ffmpeg-statigo specifically?** Pre-built static libraries with GPL-licensed FFmpeg that includes H.264 (libx264), H.265 (x265), AV1 (rav1e/dav1d), and AAC encoders. Produces YouTube-compatible MP4s out of the box.
 
@@ -64,7 +64,7 @@ Frame Renderer (image/draw + custom optimizations)
 Colourspace Conversion (path depends on encoder)
     │
     ├─ [Software] RGB → YUV420P (Pure Go, parallelised)
-    │   ├─ 8.4× faster than FFmpeg swscale
+    │   ├─ 12.8× faster than FFmpeg swscale
     │   ├─ Parallel row processing across CPU cores
     │   └─ Standard ITU-R BT.601 coefficients
     │
@@ -107,7 +107,7 @@ Automatic GPU encoder detection in `encoder/hwaccel.go`:
 Custom parallelised RGB→YUV420P converter in `encoder/frame.go`:
 - Processes image rows in parallel across CPU cores
 - Uses Go's standard ITU-R BT.601 coefficients
-- **8.4× faster than FFmpeg's swscale** (benchmarked: 346µs vs 2,915µs per 1280×720 frame)
+- **12.8× faster than FFmpeg's swscale** (benchmarked: 226µs vs 2,888µs per 1280×720 frame on AMD Ryzen 9 5950X)
 - Strong candidate for extraction as standalone Go module
 
 **Why not FFmpeg's swscale?** While ffmpeg-statigo exposes the full swscale API, benchmarking revealed our parallelised Go implementation significantly outperforms it. FFmpeg's swscale is single-threaded; our implementation distributes row processing across all CPU cores. On a 12-core/24-thread Ryzen 9, parallelisation wins decisively over SIMD.
@@ -152,7 +152,7 @@ third_party/ffmpeg-statigo/  → Git submodule: FFmpeg 8.0 static bindings
 ## Future-Proofing
 
 ### go-yuv: Parallelised Colourspace Conversion
-The RGB→YUV converter in `encoder/frame.go` is a strong candidate for extraction as a standalone Go module. Benchmarking shows it's **8.4× faster than FFmpeg's swscale** for RGB24→YUV420P conversion at 720p, thanks to goroutine-based parallelisation across CPU cores.
+The RGB→YUV converter in `encoder/frame.go` is a strong candidate for extraction as a standalone Go module. Benchmarking shows it's **12.8× faster than FFmpeg's swscale** for RGB24→YUV420P conversion at 720p, thanks to goroutine-based parallelisation across CPU cores.
 
 There's currently no pure Go library offering parallelised colourspace conversion. Existing options are either single-threaded (stdlib `color.RGBToYCbCr`) or require CGO FFmpeg bindings. A standalone `go-yuv` module would benefit:
 - Video encoding pipelines avoiding FFmpeg dependencies

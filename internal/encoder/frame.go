@@ -1,5 +1,8 @@
 package encoder
 
+// TODO: When Go 1.26 ships with the simd package, revisit with inlinable AVX2
+// intrinsics for potentially 30-50% additional gains in colour space conversion.
+
 import (
 	"runtime"
 	"sync"
@@ -8,217 +11,184 @@ import (
 	ffmpeg "github.com/linuxmatters/ffmpeg-statigo"
 )
 
-// convertRGBToYUV converts RGB24 data to YUV420P format using Go's standard library coefficients
-// with optimized parallel processing. This version achieves the best performance by combining
-// Go's proven color conversion math with efficient parallelization.
+// YCbCr coefficients from Go's color/ycbcr.go (BT.601 standard).
+// These are fixed-point values scaled by 65536 for integer arithmetic.
+const (
+	// Y coefficients (sum = 65536)
+	yR = 19595 // 0.299 * 65536
+	yG = 38470 // 0.587 * 65536
+	yB = 7471  // 0.114 * 65536
+
+	// Cb coefficients (sum = 0)
+	cbR = -11056 // -0.16874 * 65536
+	cbG = -21712 // -0.33126 * 65536
+	cbB = 32768  //  0.50000 * 65536
+
+	// Cr coefficients (sum = 0)
+	crR = 32768  //  0.50000 * 65536
+	crG = -27440 // -0.41869 * 65536
+	crB = -5328  // -0.08131 * 65536
+)
+
+// rgbToY converts RGB to Y (luma) component.
+//
+//go:inline
+func rgbToY(r, g, b int32) uint8 {
+	return uint8((yR*r + yG*g + yB*b + 1<<15) >> 16)
+}
+
+// rgbToCb converts RGB to Cb (blue-difference chroma) with branchless clamping.
+//
+//go:inline
+func rgbToCb(r, g, b int32) uint8 {
+	cb := cbR*r + cbG*g + cbB*b + 257<<15
+	if uint32(cb)&0xff000000 == 0 {
+		cb >>= 16
+	} else {
+		cb = ^(cb >> 31)
+	}
+	return uint8(cb)
+}
+
+// rgbToCr converts RGB to Cr (red-difference chroma) with branchless clamping.
+//
+//go:inline
+func rgbToCr(r, g, b int32) uint8 {
+	cr := crR*r + crG*g + crB*b + 257<<15
+	if uint32(cr)&0xff000000 == 0 {
+		cr >>= 16
+	} else {
+		cr = ^(cr >> 31)
+	}
+	return uint8(cr)
+}
+
+// parallelRows executes fn across height rows using all CPU cores.
+func parallelRows(height int, fn func(startY, endY int)) {
+	numCPU := runtime.NumCPU()
+	rowsPerWorker := height / numCPU
+	if rowsPerWorker < 1 {
+		rowsPerWorker = 1
+		numCPU = height
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(numCPU)
+
+	for worker := 0; worker < numCPU; worker++ {
+		startY := worker * rowsPerWorker
+		endY := startY + rowsPerWorker
+		if worker == numCPU-1 {
+			endY = height
+		}
+
+		go func(startY, endY int) {
+			defer wg.Done()
+			fn(startY, endY)
+		}(startY, endY)
+	}
+
+	wg.Wait()
+}
+
+// convertRGBToYUV converts RGB24 data to YUV420P (planar) format.
 func convertRGBToYUV(rgbData []byte, yuvFrame *ffmpeg.AVFrame, width, height int) error {
-	// Get pointers to Y, U, V planes
 	yPlane := yuvFrame.Data().Get(0)
 	uPlane := yuvFrame.Data().Get(1)
 	vPlane := yuvFrame.Data().Get(2)
 
-	yLinesize := yuvFrame.Linesize().Get(0)
-	uLinesize := yuvFrame.Linesize().Get(1)
-	vLinesize := yuvFrame.Linesize().Get(2)
+	yLinesize := int(yuvFrame.Linesize().Get(0))
+	uLinesize := int(yuvFrame.Linesize().Get(1))
+	vLinesize := int(yuvFrame.Linesize().Get(2))
 
-	// Use Go's exact coefficients from color/ycbcr.go
-	// These are chosen so they sum to exactly 65536 for Y calculation
-	const (
-		// Y coefficients (sum = 65536)
-		yR = 19595 // 0.299 * 65536 (rounded)
-		yG = 38470 // 0.587 * 65536 (rounded)
-		yB = 7471  // 0.114 * 65536 (rounded)
-
-		// Cb coefficients (sum = 0)
-		cbR = -11056 // -0.16874 * 65536 (rounded)
-		cbG = -21712 // -0.33126 * 65536 (rounded)
-		cbB = 32768  //  0.50000 * 65536
-
-		// Cr coefficients (sum = 0)
-		crR = 32768  //  0.50000 * 65536
-		crG = -27440 // -0.41869 * 65536 (rounded)
-		crB = -5328  // -0.08131 * 65536 (rounded)
-	)
-
-	// Parallelize by row groups
-	numCPU := runtime.NumCPU()
-	rowsPerWorker := height / numCPU
-	if rowsPerWorker < 1 {
-		rowsPerWorker = 1
-		numCPU = height
-	}
-
-	var wg sync.WaitGroup
-	wg.Add(numCPU)
-
-	for worker := 0; worker < numCPU; worker++ {
-		startY := worker * rowsPerWorker
-		endY := startY + rowsPerWorker
-		if worker == numCPU-1 {
-			endY = height
+	parallelRows(height, func(startY, endY int) {
+		// Align startY to even for correct UV row calculation
+		evenStart := startY
+		if evenStart&1 != 0 {
+			evenStart++
 		}
 
-		go func(startY, endY int) {
-			defer wg.Done()
+		// Process even rows: Y + UV
+		for y := evenStart; y < endY; y += 2 {
+			yPtr := unsafe.Add(unsafe.Pointer(yPlane), y*yLinesize)
+			uvY := y >> 1
+			uRowPtr := unsafe.Add(unsafe.Pointer(uPlane), uvY*uLinesize)
+			vRowPtr := unsafe.Add(unsafe.Pointer(vPlane), uvY*vLinesize)
+			rgbIdx := y * width * 3
 
-			for y := startY; y < endY; y++ {
-				yOffset := y * int(yLinesize)
-				yPtr := unsafe.Add(unsafe.Pointer(yPlane), yOffset)
+			for x := 0; x < width; x++ {
+				r := int32(rgbData[rgbIdx])
+				g := int32(rgbData[rgbIdx+1])
+				b := int32(rgbData[rgbIdx+2])
+				rgbIdx += 3
 
-				rgbIdx := y * width * 3
+				*(*uint8)(unsafe.Add(yPtr, x)) = rgbToY(r, g, b)
 
-				for x := 0; x < width; x++ {
-					r1 := int32(rgbData[rgbIdx])
-					g1 := int32(rgbData[rgbIdx+1])
-					b1 := int32(rgbData[rgbIdx+2])
-					rgbIdx += 3
-
-					// Y calculation with rounding adjustment
-					// Note: 19595 + 38470 + 7471 = 65536 exactly
-					yy := (yR*r1 + yG*g1 + yB*b1 + 1<<15) >> 16
-
-					// Write Y value directly
-					*(*uint8)(unsafe.Add(yPtr, x)) = uint8(yy)
-
-					// Handle U and V for 4:2:0 subsampling
-					if (y&1) == 0 && (x&1) == 0 {
-						// Cb calculation with Go's branchless clamping
-						// Note: -11056 - 21712 + 32768 = 0
-						cb := cbR*r1 + cbG*g1 + cbB*b1 + 257<<15
-						if uint32(cb)&0xff000000 == 0 {
-							cb >>= 16
-						} else {
-							cb = ^(cb >> 31)
-						}
-
-						// Cr calculation with Go's branchless clamping
-						// Note: 32768 - 27440 - 5328 = 0
-						cr := crR*r1 + crG*g1 + crB*b1 + 257<<15
-						if uint32(cr)&0xff000000 == 0 {
-							cr >>= 16
-						} else {
-							cr = ^(cr >> 31)
-						}
-
-						// Write U and V values
-						uvY := y >> 1
-						uvX := x >> 1
-
-						uOffset := uvY*int(uLinesize) + uvX
-						vOffset := uvY*int(vLinesize) + uvX
-
-						*(*uint8)(unsafe.Add(unsafe.Pointer(uPlane), uOffset)) = uint8(cb)
-						*(*uint8)(unsafe.Add(unsafe.Pointer(vPlane), vOffset)) = uint8(cr)
-					}
+				// UV subsampling: every other pixel on even rows
+				if (x & 1) == 0 {
+					uvX := x >> 1
+					*(*uint8)(unsafe.Add(uRowPtr, uvX)) = rgbToCb(r, g, b)
+					*(*uint8)(unsafe.Add(vRowPtr, uvX)) = rgbToCr(r, g, b)
 				}
 			}
-		}(startY, endY)
-	}
+		}
 
-	wg.Wait()
+		// Process odd rows: Y only (no UV)
+		oddStart := startY
+		if oddStart&1 == 0 {
+			oddStart++
+		}
+		for y := oddStart; y < endY; y += 2 {
+			yPtr := unsafe.Add(unsafe.Pointer(yPlane), y*yLinesize)
+			rgbIdx := y * width * 3
+
+			for x := 0; x < width; x++ {
+				r := int32(rgbData[rgbIdx])
+				g := int32(rgbData[rgbIdx+1])
+				b := int32(rgbData[rgbIdx+2])
+				rgbIdx += 3
+
+				*(*uint8)(unsafe.Add(yPtr, x)) = rgbToY(r, g, b)
+			}
+		}
+	})
+
 	return nil
 }
 
-// convertRGBAToNV12 converts RGBA data to NV12 format using parallel processing.
-// NV12 is semi-planar: Y plane followed by interleaved UV plane.
-// This is 8.4× faster than FFmpeg's SwsScaleFrame for Vulkan uploads.
+// convertRGBAToNV12 converts RGBA data to NV12 (semi-planar) format.
+// NV12 has a Y plane followed by interleaved UV plane.
 func convertRGBAToNV12(rgbaData []byte, nv12Frame *ffmpeg.AVFrame, width, height int) error {
-	// Get pointers to Y and UV planes (NV12 has 2 planes, not 3)
 	yPlane := nv12Frame.Data().Get(0)
-	uvPlane := nv12Frame.Data().Get(1) // Interleaved U,V
+	uvPlane := nv12Frame.Data().Get(1)
 
-	yLinesize := nv12Frame.Linesize().Get(0)
-	uvLinesize := nv12Frame.Linesize().Get(1)
+	yLinesize := int(nv12Frame.Linesize().Get(0))
+	uvLinesize := int(nv12Frame.Linesize().Get(1))
 
-	// Use Go's exact coefficients from color/ycbcr.go
-	const (
-		// Y coefficients (sum = 65536)
-		yR = 19595 // 0.299 * 65536
-		yG = 38470 // 0.587 * 65536
-		yB = 7471  // 0.114 * 65536
+	parallelRows(height, func(startY, endY int) {
+		for y := startY; y < endY; y++ {
+			yPtr := unsafe.Add(unsafe.Pointer(yPlane), y*yLinesize)
+			rgbaIdx := y * width * 4
 
-		// Cb coefficients
-		cbR = -11056 // -0.16874 * 65536
-		cbG = -21712 // -0.33126 * 65536
-		cbB = 32768  //  0.50000 * 65536
+			for x := 0; x < width; x++ {
+				r := int32(rgbaData[rgbaIdx])
+				g := int32(rgbaData[rgbaIdx+1])
+				b := int32(rgbaData[rgbaIdx+2])
+				rgbaIdx += 4 // Skip alpha
 
-		// Cr coefficients
-		crR = 32768  //  0.50000 * 65536
-		crG = -27440 // -0.41869 * 65536
-		crB = -5328  // -0.08131 * 65536
-	)
+				*(*uint8)(unsafe.Add(yPtr, x)) = rgbToY(r, g, b)
 
-	// Parallelize by row groups
-	numCPU := runtime.NumCPU()
-	rowsPerWorker := height / numCPU
-	if rowsPerWorker < 1 {
-		rowsPerWorker = 1
-		numCPU = height
-	}
-
-	var wg sync.WaitGroup
-	wg.Add(numCPU)
-
-	for worker := 0; worker < numCPU; worker++ {
-		startY := worker * rowsPerWorker
-		endY := startY + rowsPerWorker
-		if worker == numCPU-1 {
-			endY = height
-		}
-
-		go func(startY, endY int) {
-			defer wg.Done()
-
-			for y := startY; y < endY; y++ {
-				yOffset := y * int(yLinesize)
-				yPtr := unsafe.Add(unsafe.Pointer(yPlane), yOffset)
-
-				rgbaIdx := y * width * 4 // RGBA = 4 bytes per pixel
-
-				for x := 0; x < width; x++ {
-					r1 := int32(rgbaData[rgbaIdx])
-					g1 := int32(rgbaData[rgbaIdx+1])
-					b1 := int32(rgbaData[rgbaIdx+2])
-					// Skip alpha (rgbaData[rgbaIdx+3])
-					rgbaIdx += 4
-
-					// Y calculation
-					yy := (yR*r1 + yG*g1 + yB*b1 + 1<<15) >> 16
-					*(*uint8)(unsafe.Add(yPtr, x)) = uint8(yy)
-
-					// Handle UV for 4:2:0 subsampling (NV12 interleaved)
-					if (y&1) == 0 && (x&1) == 0 {
-						// Cb calculation with branchless clamping
-						cb := cbR*r1 + cbG*g1 + cbB*b1 + 257<<15
-						if uint32(cb)&0xff000000 == 0 {
-							cb >>= 16
-						} else {
-							cb = ^(cb >> 31)
-						}
-
-						// Cr calculation with branchless clamping
-						cr := crR*r1 + crG*g1 + crB*b1 + 257<<15
-						if uint32(cr)&0xff000000 == 0 {
-							cr >>= 16
-						} else {
-							cr = ^(cr >> 31)
-						}
-
-						// NV12: UV interleaved in second plane
-						// Each UV pair corresponds to a 2x2 block of Y values
-						uvY := y >> 1
-						uvX := x >> 1
-						uvOffset := uvY*int(uvLinesize) + uvX*2 // *2 because U,V are interleaved
-
-						uvPtr := unsafe.Add(unsafe.Pointer(uvPlane), uvOffset)
-						*(*uint8)(uvPtr) = uint8(cb)                // U
-						*(*uint8)(unsafe.Add(uvPtr, 1)) = uint8(cr) // V
-					}
+				// UV subsampling: top-left pixel of each 2×2 block
+				if (y&1) == 0 && (x&1) == 0 {
+					uvY := y >> 1
+					uvX := x >> 1
+					uvPtr := unsafe.Add(unsafe.Pointer(uvPlane), uvY*uvLinesize+uvX*2)
+					*(*uint8)(uvPtr) = rgbToCb(r, g, b)
+					*(*uint8)(unsafe.Add(uvPtr, 1)) = rgbToCr(r, g, b)
 				}
 			}
-		}(startY, endY)
-	}
+		}
+	})
 
-	wg.Wait()
 	return nil
 }

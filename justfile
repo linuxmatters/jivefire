@@ -108,13 +108,41 @@ install: build
     @echo "Installed jivefire to ~/.local/bin/jivefire"
     @echo "Make sure ~/.local/bin is in your PATH"
 
-# Benchmark RGB→YUV conversion
+# Benchmark RGB→YUV conversion (quick summary)
 bench-yuv:
     @go test -v ./internal/encoder/ -run=TestBenchmarkSummary
 
-# Benchmark RGB→YUV with iterations
+# Benchmark RGB→YUV with Go's testing.B
 bench-yuv-full:
     go test -bench=. -benchmem ./internal/encoder/ -run='^$$'
+
+# Benchmark RGB→YUV with hyperfine (statistical analysis)
+bench-yuv-hyperfine:
+    #!/usr/bin/env bash
+    set -e
+
+    if ! command -v hyperfine &> /dev/null; then
+        echo "Error: hyperfine not found. Install it with your package manager."
+        exit 1
+    fi
+
+    echo "Building bench-yuv tool..."
+    go build -o ./bench-yuv ./cmd/bench-yuv
+
+    echo ""
+    echo "Benchmarking RGB→YUV420P colourspace conversion (1280×720, 1000 iterations)"
+    echo ""
+
+    hyperfine \
+        --warmup 1 \
+        --runs 5 \
+        --command-name "Go (parallel)" "./bench-yuv --impl=go --iterations=1000" \
+        --command-name "FFmpeg swscale" "./bench-yuv --impl=swscale --iterations=1000" \
+        --export-markdown testdata/bench-yuv.md
+
+    rm -f ./bench-yuv
+    echo ""
+    echo "Results saved to testdata/bench-yuv.md"
 
 # Benchmark video encoders (auto-detects available hardware)
 bench-encoders: build
