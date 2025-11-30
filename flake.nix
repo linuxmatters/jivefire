@@ -24,7 +24,7 @@
             with pkgs;
             [
               curl
-              ffmpeg
+              ffmpeg-full
               gnugrep
               gcc
               go
@@ -33,6 +33,8 @@
             ]
             ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
               vulkan-loader # Required for Vulkan accelerated encoders on Linux
+              intel-media-driver # VA-API driver for Intel GPUs (iHD_drv_video.so)
+              vpl-gpu-rt # oneVPL runtime for Intel GPUs (QSV backend)
             ];
 
           # Make GPU drivers visible for hardware-accelerated encoding
@@ -49,6 +51,11 @@
             fi
             # Add vulkan-loader library path for h264_vulkan encoder
             export LD_LIBRARY_PATH="${pkgs.vulkan-loader}/lib:$LD_LIBRARY_PATH"
+            # Add Intel media driver, and oneVPL libraries for QSV
+            export LD_LIBRARY_PATH="${pkgs.intel-media-driver}/lib:$LD_LIBRARY_PATH"
+            export LD_LIBRARY_PATH="${pkgs.vpl-gpu-rt}/lib:$LD_LIBRARY_PATH"
+            # oneVPL runtime search path for QSV
+            export ONEVPL_SEARCH_PATH="${pkgs.vpl-gpu-rt}/lib"
           '';
         };
       }

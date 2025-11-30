@@ -159,12 +159,12 @@ bench-encoders: build
     fi
 
     # Check for QSV (Intel GPU)
-    if ffmpeg -hide_banner -encoders 2>/dev/null | grep -q h264_qsv; then
-        if [ -e /dev/dri/renderD128 ]; then
-            echo "✓ QSV detected (Intel GPU)"
-            ENCODERS+=("--command-name" "QSV (h264_qsv)" "./jivefire --no-preview --encoder=qsv '$INPUT' testdata/bench-qsv.mp4")
-        fi
-    fi
+    #if ffmpeg -hide_banner -encoders 2>/dev/null | grep -q h264_qsv; then
+    #    if [ -e /dev/dri/renderD128 ]; then
+    #        echo "✓ QSV detected (Intel GPU)"
+    #        ENCODERS+=("--command-name" "QSV (h264_qsv)" "./jivefire --no-preview --encoder=qsv '$INPUT' testdata/bench-qsv.mp4")
+    #    fi
+    #fi
 
     # Check for VideoToolbox (macOS)
     if ffmpeg -hide_banner -encoders 2>/dev/null | grep -q h264_videotoolbox; then
@@ -185,9 +185,6 @@ bench-encoders: build
 
     echo ""
     echo "Results saved to testdata/bench-encoders.md"
-
-    # Clean up benchmark outputs
-    rm -f testdata/bench-*.mp4
 
 # Record gif
 vhs: build

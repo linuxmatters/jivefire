@@ -77,13 +77,13 @@ type Encoder struct {
 	hwEncoder   *HWEncoder
 	hwDeviceCtx *ffmpeg.AVBufferRef
 
-	// Vulkan-specific: hardware frames context for GPU upload
+	// Hardware frames context for GPU upload (Vulkan and QSV)
 	hwFramesCtx *ffmpeg.AVBufferRef
 
-	// Vulkan-specific: pre-allocated reusable NV12 frame for parallel Go conversion
-	vulkanNV12Frame *ffmpeg.AVFrame
+	// Pre-allocated reusable NV12 frame for parallel Go conversion (Vulkan and QSV)
+	hwNV12Frame *ffmpeg.AVFrame
 
-	// Input pixel format (RGBA for NVENC, NV12 for Vulkan, YUV420P for software)
+	// Input pixel format (RGBA for NVENC, NV12 for Vulkan/QSV, YUV420P for software)
 	inputPixFmt ffmpeg.AVPixelFormat
 
 	// Audio stream and encoder
@@ -156,8 +156,30 @@ func (e *Encoder) Initialize() error {
 		}
 
 		// Create hardware device context
-		ret, err = ffmpeg.AVHWDeviceCtxCreate(&e.hwDeviceCtx, e.hwEncoder.DeviceType, nil, nil, 0)
-		if err != nil || ret < 0 {
+		// For QSV on Linux with multiple GPUs, try common Intel render nodes
+		var deviceCreated bool
+		if e.hwEncoder.Type == HWAccelQSV {
+			// Try specific Intel GPU render nodes first
+			for _, device := range []string{"/dev/dri/renderD128", "/dev/dri/renderD129", ""} {
+				var deviceCStr *ffmpeg.CStr
+				if device != "" {
+					deviceCStr = ffmpeg.ToCStr(device)
+				}
+				ret, err = ffmpeg.AVHWDeviceCtxCreate(&e.hwDeviceCtx, e.hwEncoder.DeviceType, deviceCStr, nil, 0)
+				if deviceCStr != nil {
+					deviceCStr.Free()
+				}
+				if err == nil && ret >= 0 {
+					deviceCreated = true
+					break
+				}
+			}
+		} else {
+			ret, err = ffmpeg.AVHWDeviceCtxCreate(&e.hwDeviceCtx, e.hwEncoder.DeviceType, nil, nil, 0)
+			deviceCreated = (err == nil && ret >= 0)
+		}
+
+		if !deviceCreated {
 			// Fall back to software if hardware init fails
 			e.hwEncoder = nil
 			e.hwDeviceCtx = nil
@@ -193,7 +215,7 @@ func (e *Encoder) Initialize() error {
 
 	// Set pixel format based on encoder type
 	// NVENC can accept RGBA directly and do colourspace conversion on GPU
-	// Vulkan requires NV12 uploaded to GPU via hwframes context
+	// Vulkan/QSV require NV12 uploaded to GPU via hwframes context
 	// Software encoder uses YUV420P (we do RGB→YUV conversion on CPU)
 	if e.hwEncoder != nil && e.hwEncoder.Type == HWAccelNVENC {
 		e.inputPixFmt = ffmpeg.AVPixFmtRgba
@@ -204,17 +226,21 @@ func (e *Encoder) Initialize() error {
 		e.videoCodec.SetPixFmt(ffmpeg.AVPixFmtVulkan)
 
 		// Set up hardware frames context for Vulkan
-		if err := e.setupVulkanFramesContext(); err != nil {
+		if err := e.setupHWFramesContext(ffmpeg.AVPixFmtVulkan); err != nil {
 			return fmt.Errorf("failed to setup Vulkan frames context: %w", err)
 		}
+	} else if e.hwEncoder != nil && e.hwEncoder.Type == HWAccelQSV {
+		// QSV encoder requires hardware frames context with NV12 software format
+		e.inputPixFmt = ffmpeg.AVPixFmtNv12
+		e.videoCodec.SetPixFmt(ffmpeg.AVPixFmtQsv)
 	} else {
 		e.inputPixFmt = ffmpeg.AVPixFmtYuv420P
 		e.videoCodec.SetPixFmt(ffmpeg.AVPixFmtYuv420P)
 	}
 
-	// Attach hardware device context to codec if using hardware encoding (non-Vulkan)
-	// Vulkan uses hw_frames_ctx instead
-	if e.hwDeviceCtx != nil && (e.hwEncoder == nil || e.hwEncoder.Type != HWAccelVulkan) {
+	// Attach hardware device context to codec if using hardware encoding (NVENC only)
+	// Vulkan and QSV use hw_frames_ctx instead of hw_device_ctx
+	if e.hwDeviceCtx != nil && e.hwEncoder != nil && e.hwEncoder.Type == HWAccelNVENC {
 		// Create a new reference to the hw device context for the codec
 		e.videoCodec.SetHwDeviceCtx(ffmpeg.AVBufferRef_(e.hwDeviceCtx))
 	}
@@ -353,10 +379,11 @@ func (e *Encoder) setHWEncoderOptions(opts **ffmpeg.AVDictionary) error {
 	return nil
 }
 
-// setupVulkanFramesContext creates and configures the hardware frames context
-// required for Vulkan video encoding. Vulkan requires frames to be uploaded to
-// GPU memory before encoding, using NV12 format as the software pixel format.
-func (e *Encoder) setupVulkanFramesContext() error {
+// setupHWFramesContext creates and configures the hardware frames context
+// required for Vulkan and QSV video encoding. These encoders require frames to
+// be uploaded to GPU memory before encoding, using NV12 format as the software
+// pixel format.
+func (e *Encoder) setupHWFramesContext(hwPixFmt ffmpeg.AVPixelFormat) error {
 	if e.hwDeviceCtx == nil {
 		return fmt.Errorf("hardware device context not available")
 	}
@@ -374,8 +401,8 @@ func (e *Encoder) setupVulkanFramesContext() error {
 		return fmt.Errorf("failed to get hardware frames context")
 	}
 
-	// Configure the frames context for Vulkan encoding
-	framesCtx.SetFormat(ffmpeg.AVPixFmtVulkan) // Hardware format
+	// Configure the frames context for hardware encoding (Vulkan or QSV)
+	framesCtx.SetFormat(hwPixFmt)              // Hardware format (AVPixFmtVulkan or AVPixFmtQsv)
 	framesCtx.SetSwFormat(ffmpeg.AVPixFmtNv12) // Software format for upload
 	framesCtx.SetWidth(e.config.Width)
 	framesCtx.SetHeight(e.config.Height)
@@ -394,15 +421,15 @@ func (e *Encoder) setupVulkanFramesContext() error {
 	e.videoCodec.SetHwFramesCtx(ffmpeg.AVBufferRef_(hwFramesRef))
 
 	// Pre-allocate reusable NV12 frame for parallel Go RGBA→NV12 conversion
-	e.vulkanNV12Frame = ffmpeg.AVFrameAlloc()
-	if e.vulkanNV12Frame == nil {
+	e.hwNV12Frame = ffmpeg.AVFrameAlloc()
+	if e.hwNV12Frame == nil {
 		return fmt.Errorf("failed to allocate reusable NV12 frame")
 	}
-	e.vulkanNV12Frame.SetWidth(e.config.Width)
-	e.vulkanNV12Frame.SetHeight(e.config.Height)
-	e.vulkanNV12Frame.SetFormat(int(ffmpeg.AVPixFmtNv12))
+	e.hwNV12Frame.SetWidth(e.config.Width)
+	e.hwNV12Frame.SetHeight(e.config.Height)
+	e.hwNV12Frame.SetFormat(int(ffmpeg.AVPixFmtNv12))
 
-	ret, err = ffmpeg.AVFrameGetBuffer(e.vulkanNV12Frame, 0)
+	ret, err = ffmpeg.AVFrameGetBuffer(e.hwNV12Frame, 0)
 	if err != nil {
 		return fmt.Errorf("failed to allocate NV12 buffer: %w", err)
 	}
@@ -534,9 +561,9 @@ func (e *Encoder) WriteFrameRGBA(rgbaData []byte) error {
 		return e.writeFrameRGBADirect(rgbaData)
 	}
 
-	// For Vulkan, convert RGBA→NV12 then upload to GPU
-	if e.hwEncoder != nil && e.hwEncoder.Type == HWAccelVulkan {
-		return e.writeFrameVulkan(rgbaData)
+	// For Vulkan/QSV, convert RGBA→NV12 then upload to GPU
+	if e.hwEncoder != nil && (e.hwEncoder.Type == HWAccelVulkan || e.hwEncoder.Type == HWAccelQSV) {
+		return e.writeFrameHWUpload(rgbaData)
 	}
 
 	// For software encoder, convert RGBA to RGB24 then to YUV420P
@@ -615,19 +642,23 @@ func (e *Encoder) writeFrameRGBADirect(rgbaData []byte) error {
 // writeFrameVulkan converts RGBA to NV12, uploads to Vulkan, and encodes
 // Pipeline: RGBA (CPU) → parallel Go conversion → NV12 (CPU) → AVHWFrameTransferData → Vulkan (GPU) → encode
 // Uses pre-allocated reusable NV12 frame and parallel Go conversion (8.4× faster than SwsScaleFrame)
-func (e *Encoder) writeFrameVulkan(rgbaData []byte) error {
+// writeFrameHWUpload converts RGBA to NV12, uploads to GPU, and encodes
+// Pipeline: RGBA (CPU) → parallel Go conversion → NV12 (CPU) → AVHWFrameTransferData → GPU → encode
+// Used by Vulkan (h264_vulkan) and QSV (h264_qsv) encoders
+// Uses pre-allocated reusable NV12 frame and parallel Go conversion (8.4× faster than SwsScaleFrame)
+func (e *Encoder) writeFrameHWUpload(rgbaData []byte) error {
 	width := e.config.Width
 	height := e.config.Height
 
-	// Use pre-allocated NV12 frame (already configured in setupVulkanFramesContext)
-	nv12Frame := e.vulkanNV12Frame
+	// Use pre-allocated NV12 frame (already configured in setupHWFramesContext)
+	nv12Frame := e.hwNV12Frame
 
 	// Convert RGBA → NV12 using parallel Go conversion (much faster than SwsScaleFrame)
 	if err := convertRGBAToNV12(rgbaData, nv12Frame, width, height); err != nil {
 		return fmt.Errorf("failed to convert RGBA to NV12: %w", err)
 	}
 
-	// Allocate Vulkan hardware frame from pool
+	// Allocate hardware frame from pool
 	// Note: hwFrame must be allocated per-call as it's returned to pool after encoding
 	hwFrame := ffmpeg.AVFrameAlloc()
 	if hwFrame == nil {
@@ -644,13 +675,13 @@ func (e *Encoder) writeFrameVulkan(rgbaData []byte) error {
 		return fmt.Errorf("failed to get hardware frame buffer: %d", ret)
 	}
 
-	// Upload NV12 frame to Vulkan GPU memory
+	// Upload NV12 frame to GPU memory
 	ret, err = ffmpeg.AVHWFrameTransferData(hwFrame, nv12Frame, 0)
 	if err != nil {
-		return fmt.Errorf("failed to upload frame to Vulkan: %w", err)
+		return fmt.Errorf("failed to upload frame to GPU: %w", err)
 	}
 	if ret < 0 {
-		return fmt.Errorf("failed to upload frame to Vulkan: %d", ret)
+		return fmt.Errorf("failed to upload frame to GPU: %d", ret)
 	}
 
 	// Copy frame properties for encoder
@@ -660,10 +691,10 @@ func (e *Encoder) writeFrameVulkan(rgbaData []byte) error {
 	// Send hardware frame to encoder
 	ret, err = ffmpeg.AVCodecSendFrame(e.videoCodec, hwFrame)
 	if err != nil {
-		return fmt.Errorf("failed to send frame to Vulkan encoder: %w", err)
+		return fmt.Errorf("failed to send frame to hardware encoder: %w", err)
 	}
 	if ret < 0 {
-		return fmt.Errorf("failed to send frame to Vulkan encoder: %d", ret)
+		return fmt.Errorf("failed to send frame to hardware encoder: %d", ret)
 	}
 
 	// Receive and write encoded packets
@@ -1284,9 +1315,9 @@ func (e *Encoder) Close() error {
 		e.hwFramesCtx = nil
 	}
 	// Free pre-allocated Vulkan NV12 frame
-	if e.vulkanNV12Frame != nil {
-		ffmpeg.AVFrameFree(&e.vulkanNV12Frame)
-		e.vulkanNV12Frame = nil
+	if e.hwNV12Frame != nil {
+		ffmpeg.AVFrameFree(&e.hwNV12Frame)
+		e.hwNV12Frame = nil
 	}
 
 	// Free format context
