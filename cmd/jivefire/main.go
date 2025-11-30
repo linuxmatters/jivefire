@@ -211,8 +211,9 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 	estimatedTotalFrames := int(metadata.NumSamples) / samplesPerFrame
 
 	// Create unified Bubbletea program for both passes
+	// Use alternate screen buffer to prevent ghost box edges when view height changes
 	model := ui.NewModel(noPreview)
-	p := tea.NewProgram(model)
+	p := tea.NewProgram(model, tea.WithAltScreen())
 
 	// Shared state between goroutines
 	var profile *audio.AudioProfile
@@ -256,10 +257,18 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 		runPass2(p, inputFile, outputFile, channels, noPreview, hwAccel, runtimeConfig, profile, thumbnailDuration, overallStartTime)
 	}()
 
-	// Run the unified Bubbletea UI
-	if _, err := p.Run(); err != nil {
+	// Run the unified Bubbletea UI (uses alternate screen buffer)
+	finalModel, err := p.Run()
+	if err != nil {
 		cli.PrintError(fmt.Sprintf("running UI: %v", err))
 		os.Exit(1)
+	}
+
+	// Print completion summary after exiting alternate screen
+	if m, ok := finalModel.(*ui.Model); ok {
+		if summary := m.CompletionSummary(); summary != "" {
+			fmt.Println(summary)
+		}
 	}
 
 	// Check for analysis errors (encoding errors handled within runPass2)

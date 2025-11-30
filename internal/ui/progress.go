@@ -231,6 +231,15 @@ func (m *Model) View() string {
 	return m.renderProgress()
 }
 
+// CompletionSummary returns the final completion summary for printing after alt screen exits.
+// Returns empty string if encoding is not complete.
+func (m *Model) CompletionSummary() string {
+	if m.complete == nil {
+		return ""
+	}
+	return m.renderFinalProgress() + "\n" + m.renderComplete()
+}
+
 // renderFinalProgress renders the progress UI in its final completed state
 func (m *Model) renderFinalProgress() string {
 	var s strings.Builder
