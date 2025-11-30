@@ -116,7 +116,7 @@ bench-yuv:
 bench-yuv-full:
     go test -bench=. -benchmem ./internal/encoder/ -run='^$$'
 
-# Benchmark video encoders (NVENC vs Vulkan vs Software)
+# Benchmark video encoders (auto-detects available hardware)
 bench-encoders: build
     #!/usr/bin/env bash
     set -e
@@ -136,6 +136,43 @@ bench-encoders: build
     # Clean up any previous benchmark outputs
     rm -f testdata/bench-*.mp4
 
+    # Detect available encoders
+    ENCODERS=()
+
+    # Software is always available
+    ENCODERS+=("--command-name" "Software (libx264)" "./jivefire --no-preview --encoder=software '$INPUT' testdata/bench-software.mp4")
+
+    # Check for NVENC (NVIDIA GPU)
+    if ffmpeg -hide_banner -encoders 2>/dev/null | grep -q h264_nvenc; then
+        if nvidia-smi &>/dev/null; then
+            echo "✓ NVENC detected (NVIDIA GPU)"
+            ENCODERS+=("--command-name" "NVENC (h264_nvenc)" "./jivefire --no-preview --encoder=nvenc '$INPUT' testdata/bench-nvenc.mp4")
+        fi
+    fi
+
+    # Check for Vulkan Video (AMD/Intel/NVIDIA with Vulkan support)
+    if ffmpeg -hide_banner -encoders 2>/dev/null | grep -q h264_vulkan; then
+        if vulkaninfo --summary &>/dev/null; then
+            echo "✓ Vulkan detected"
+            ENCODERS+=("--command-name" "Vulkan (h264_vulkan)" "./jivefire --no-preview --encoder=vulkan '$INPUT' testdata/bench-vulkan.mp4")
+        fi
+    fi
+
+    # Check for QSV (Intel GPU)
+    if ffmpeg -hide_banner -encoders 2>/dev/null | grep -q h264_qsv; then
+        if [ -e /dev/dri/renderD128 ]; then
+            echo "✓ QSV detected (Intel GPU)"
+            ENCODERS+=("--command-name" "QSV (h264_qsv)" "./jivefire --no-preview --encoder=qsv '$INPUT' testdata/bench-qsv.mp4")
+        fi
+    fi
+
+    # Check for VideoToolbox (macOS)
+    if ffmpeg -hide_banner -encoders 2>/dev/null | grep -q h264_videotoolbox; then
+        echo "✓ VideoToolbox detected (macOS)"
+        ENCODERS+=("--command-name" "VideoToolbox (h264_videotoolbox)" "./jivefire --no-preview --encoder=videotoolbox '$INPUT' testdata/bench-videotoolbox.mp4")
+    fi
+
+    echo ""
     echo "Benchmarking video encoders with hyperfine..."
     echo "Input: $INPUT"
     echo ""
@@ -144,12 +181,7 @@ bench-encoders: build
         --warmup 1 \
         --runs 3 \
         --export-markdown testdata/bench-encoders.md \
-        --command-name "Software (libx264)" \
-            "./jivefire --no-preview --encoder=software '$INPUT' testdata/bench-software.mp4" \
-        --command-name "Vulkan (h264_vulkan)" \
-            "./jivefire --no-preview --encoder=vulkan '$INPUT' testdata/bench-vulkan.mp4" \
-        --command-name "NVENC (h264_nvenc)" \
-            "./jivefire --no-preview --encoder=nvenc '$INPUT' testdata/bench-nvenc.mp4"
+        "${ENCODERS[@]}"
 
     echo ""
     echo "Results saved to testdata/bench-encoders.md"
