@@ -116,7 +116,6 @@ type Model struct {
 
 	// Pass 2 state
 	renderState RenderProgress
-	audioFlush  *AudioFlushProgress
 	complete    *RenderComplete
 
 	// Timing
@@ -133,10 +132,6 @@ type Model struct {
 	cachedFrameNum  int
 	completionDelay time.Duration
 	quitting        bool
-
-	// Audio flush tracking
-	estimatedAudioPackets int
-	inAudioPhase          bool
 }
 
 // NewModel creates a new unified progress UI model
@@ -201,19 +196,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case RenderProgress:
 		m.renderState = msg
-		m.audioFlush = nil
-		m.inAudioPhase = false
-		m.estimatedAudioPackets = int(float64(msg.TotalFrames) * 0.36)
-		return m, nil
-
-	case AudioFlushProgress:
-		m.audioFlush = &msg
-		if !m.inAudioPhase {
-			m.inAudioPhase = true
-			if msg.PacketsProcessed > m.estimatedAudioPackets {
-				m.estimatedAudioPackets = int(float64(msg.PacketsProcessed) * 1.1)
-			}
-		}
 		return m, nil
 
 	case RenderComplete:
@@ -380,35 +362,14 @@ func (m *Model) renderRenderingProgress(s *strings.Builder) {
 		return
 	}
 
-	// Calculate unified progress across video and audio
-	videoWeight := 0.88
-	audioWeight := 0.12
+	// Progress is based on video frames (audio is encoded alongside each frame)
+	percent := float64(m.renderState.Frame) / float64(m.renderState.TotalFrames)
+	currentPhase := fmt.Sprintf("Frame %d of %d", m.renderState.Frame, m.renderState.TotalFrames)
 
-	videoPercent := float64(m.renderState.Frame) / float64(m.renderState.TotalFrames)
-	audioPercent := 0.0
-	var currentPhase string
-
-	if m.inAudioPhase && m.audioFlush != nil && m.estimatedAudioPackets > 0 {
-		audioPercent = float64(m.audioFlush.PacketsProcessed) / float64(m.estimatedAudioPackets)
-		if audioPercent > 1.0 {
-			audioPercent = 1.0
-		}
-		currentPhase = "Finalising audio streams"
-	} else {
-		currentPhase = fmt.Sprintf("Frame %d of %d", m.renderState.Frame, m.renderState.TotalFrames)
-	}
-
-	var overallPercent float64
-	if m.inAudioPhase {
-		overallPercent = videoWeight + (audioPercent * audioWeight)
-	} else {
-		overallPercent = videoPercent * videoWeight
-	}
-
-	progressBar := m.progressBar.ViewAs(overallPercent)
+	progressBar := m.progressBar.ViewAs(percent)
 	s.WriteString("Progress: ")
 	s.WriteString(progressBar)
-	s.WriteString(fmt.Sprintf("  %d%%", int(overallPercent*100)))
+	s.WriteString(fmt.Sprintf("  %d%%", int(percent*100)))
 	s.WriteString("\n\n")
 
 	// Timing information
@@ -416,15 +377,12 @@ func (m *Model) renderRenderingProgress(s *strings.Builder) {
 	if elapsed == 0 {
 		elapsed = time.Since(m.pass2StartTime)
 	}
-	if m.inAudioPhase && m.audioFlush != nil && m.audioFlush.Elapsed > 0 {
-		elapsed = m.audioFlush.Elapsed
-	}
 
 	var estimatedTotal, eta time.Duration
 	var speed float64
 
-	if overallPercent > 0 {
-		estimatedTotal = time.Duration(float64(elapsed) / overallPercent)
+	if percent > 0 {
+		estimatedTotal = time.Duration(float64(elapsed) / percent)
 		eta = estimatedTotal - elapsed
 
 		videoEncodedSoFar := time.Duration(m.renderState.Frame) * time.Second / 30
