@@ -84,6 +84,32 @@ func PrintBanner() {
 func PrintVersion(version string) {
 	fmt.Println(TitleStyle.Render("Jivefire 🔥"))
 	fmt.Printf("%s %s\n", KeyStyle.Render("Version:"), ValueStyle.Render(version))
+}
+
+// EncoderInfo holds information about a hardware encoder for display
+type EncoderInfo struct {
+	Name        string
+	Description string
+	Available   bool
+}
+
+// PrintHardwareProbe prints a styled hardware encoder probe result
+func PrintHardwareProbe(encoders []EncoderInfo) {
+	fmt.Println(TitleStyle.Render("Jivefire 🔥"))
+	fmt.Println(HeaderStyle.Render("Hardware Encoder Probe"))
+
+	for _, enc := range encoders {
+		var status string
+		if enc.Available {
+			status = HighlightStyle.Render("✓ available")
+		} else {
+			status = ErrorStyle.Render("✗ not available")
+		}
+		fmt.Printf("  %s (%s): %s\n",
+			ValueStyle.Render(enc.Description),
+			KeyStyle.Render(enc.Name),
+			status)
+	}
 	fmt.Println()
 }
 

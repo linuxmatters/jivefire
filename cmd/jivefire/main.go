@@ -37,6 +37,7 @@ var CLI struct {
 	NoPreview       bool   `help:"Disable video preview during encoding"`
 	Encoder         string `help:"Video encoder: auto, nvenc, qsv, vulkan, software" default:"auto"`
 	Version         bool   `help:"Show version information"`
+	Probe           bool   `help:"Probe and display available hardware encoders"`
 }
 
 func main() {
@@ -51,6 +52,21 @@ func main() {
 	// Handle version flag
 	if CLI.Version {
 		cli.PrintVersion(version)
+		os.Exit(0)
+	}
+
+	// Handle probe flag - display hardware encoder status
+	if CLI.Probe {
+		encoders := encoder.DetectHWEncoders()
+		var infos []cli.EncoderInfo
+		for _, enc := range encoders {
+			infos = append(infos, cli.EncoderInfo{
+				Name:        enc.Name,
+				Description: enc.Description,
+				Available:   enc.Available,
+			})
+		}
+		cli.PrintHardwareProbe(infos)
 		os.Exit(0)
 	}
 
@@ -90,6 +106,29 @@ func main() {
 	if !ok {
 		cli.PrintError(fmt.Sprintf("invalid --encoder value: %s (must be auto, nvenc, qsv, vulkan, or software)", CLI.Encoder))
 		os.Exit(1)
+	}
+
+	// If user explicitly requested a specific hardware encoder, verify it's available
+	if hwAccelType != encoder.HWAccelAuto && hwAccelType != encoder.HWAccelNone {
+		selectedEncoder := encoder.SelectBestEncoder(hwAccelType)
+		if selectedEncoder == nil {
+			// Requested encoder not available - list what IS available
+			encoders := encoder.DetectHWEncoders()
+			var available []string
+			for _, enc := range encoders {
+				if enc.Available {
+					available = append(available, string(enc.Type))
+				}
+			}
+			if len(available) > 0 {
+				cli.PrintError(fmt.Sprintf("requested encoder '%s' is not available. Available hardware encoders: %s",
+					CLI.Encoder, strings.Join(available, ", ")))
+			} else {
+				cli.PrintError(fmt.Sprintf("requested encoder '%s' is not available. No hardware encoders detected; use --encoder=software",
+					CLI.Encoder))
+			}
+			os.Exit(1)
+		}
 	}
 
 	// Build runtime config from CLI arguments

@@ -164,39 +164,32 @@ bench-encoders: build
     # Clean up any previous benchmark outputs
     rm -f testdata/bench-*.mp4
 
-    # Detect available encoders
+    # Use jivefire's built-in hardware probe to detect available encoders
+    echo "Probing hardware encoders..."
+    ./jivefire --probe
+
+    # Build encoder list from probe results
     ENCODERS=()
 
     # Software is always available
     ENCODERS+=("--command-name" "Software (libx264)" "./jivefire --no-preview --encoder=software '$INPUT' testdata/bench-software.mp4")
 
-    # Check for NVENC (NVIDIA GPU)
-    if ffmpeg -hide_banner -encoders 2>/dev/null | grep -q h264_nvenc; then
-        if nvidia-smi &>/dev/null; then
-            echo "✓ NVENC detected (NVIDIA GPU)"
-            ENCODERS+=("--command-name" "NVENC (h264_nvenc)" "./jivefire --no-preview --encoder=nvenc '$INPUT' testdata/bench-nvenc.mp4")
-        fi
+    # Parse jivefire --probe output to detect available hardware encoders
+    PROBE_OUTPUT=$(./jivefire --probe 2>&1)
+
+    if echo "$PROBE_OUTPUT" | grep -q "h264_nvenc.*✓ available"; then
+        ENCODERS+=("--command-name" "NVENC (h264_nvenc)" "./jivefire --no-preview --encoder=nvenc '$INPUT' testdata/bench-nvenc.mp4")
     fi
 
-    # Check for Vulkan Video (AMD/Intel/NVIDIA with Vulkan support)
-    if ffmpeg -hide_banner -encoders 2>/dev/null | grep -q h264_vulkan; then
-        if vulkaninfo --summary &>/dev/null; then
-            echo "✓ Vulkan detected"
-            ENCODERS+=("--command-name" "Vulkan (h264_vulkan)" "./jivefire --no-preview --encoder=vulkan '$INPUT' testdata/bench-vulkan.mp4")
-        fi
+    if echo "$PROBE_OUTPUT" | grep -q "h264_vulkan.*✓ available"; then
+        ENCODERS+=("--command-name" "Vulkan (h264_vulkan)" "./jivefire --no-preview --encoder=vulkan '$INPUT' testdata/bench-vulkan.mp4")
     fi
 
-    # Check for QSV (Intel GPU)
-    #if ffmpeg -hide_banner -encoders 2>/dev/null | grep -q h264_qsv; then
-    #    if [ -e /dev/dri/renderD128 ]; then
-    #        echo "✓ QSV detected (Intel GPU)"
-    #        ENCODERS+=("--command-name" "QSV (h264_qsv)" "./jivefire --no-preview --encoder=qsv '$INPUT' testdata/bench-qsv.mp4")
-    #    fi
-    #fi
+    if echo "$PROBE_OUTPUT" | grep -q "h264_qsv.*✓ available"; then
+        ENCODERS+=("--command-name" "QSV (h264_qsv)" "./jivefire --no-preview --encoder=qsv '$INPUT' testdata/bench-qsv.mp4")
+    fi
 
-    # Check for VideoToolbox (macOS)
-    if ffmpeg -hide_banner -encoders 2>/dev/null | grep -q h264_videotoolbox; then
-        echo "✓ VideoToolbox detected (macOS)"
+    if echo "$PROBE_OUTPUT" | grep -q "h264_videotoolbox.*✓ available"; then
         ENCODERS+=("--command-name" "VideoToolbox (h264_videotoolbox)" "./jivefire --no-preview --encoder=videotoolbox '$INPUT' testdata/bench-videotoolbox.mp4")
     fi
 

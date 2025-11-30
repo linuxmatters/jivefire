@@ -56,6 +56,13 @@
             export LD_LIBRARY_PATH="${pkgs.vpl-gpu-rt}/lib:$LD_LIBRARY_PATH"
             # oneVPL runtime search path for QSV
             export ONEVPL_SEARCH_PATH="${pkgs.vpl-gpu-rt}/lib"
+
+            # Vulkan ICD discovery: tell vulkan-loader where to find GPU drivers
+            # NixOS installs ICDs under /run/opengl-driver/share/vulkan/icd.d/
+            # This enables NVIDIA Vulkan on systems with both Intel iGPU and NVIDIA dGPU
+            if [ -d "/run/opengl-driver/share/vulkan/icd.d" ]; then
+              export VK_DRIVER_FILES=$(find /run/opengl-driver/share/vulkan/icd.d -name '*.json' 2>/dev/null | tr '\n' ':' | sed 's/:$//')
+            fi
           '';
         };
       }

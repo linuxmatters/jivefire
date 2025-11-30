@@ -71,6 +71,101 @@ func testHardwareAvailable(deviceType ffmpeg.AVHWDeviceType) bool {
 	return false
 }
 
+// testEncoderAvailable performs a full encoder capability test by attempting to
+// configure and open the encoder with proper hardware context. This catches cases
+// where a hardware device exists but doesn't support the specific encoder
+// (e.g., Intel iGPU with Vulkan but no Vulkan Video encoding support).
+func testEncoderAvailable(encoderName string, deviceType ffmpeg.AVHWDeviceType, accelType HWAccelType) bool {
+	// Save current log level and temporarily silence FFmpeg logs
+	oldLevel, _ := ffmpeg.AVLogGetLevel()
+	ffmpeg.AVLogSetLevel(ffmpeg.AVLogQuiet)
+	defer ffmpeg.AVLogSetLevel(oldLevel)
+
+	// Find the encoder
+	encName := ffmpeg.ToCStr(encoderName)
+	defer encName.Free()
+	codec := ffmpeg.AVCodecFindEncoderByName(encName)
+	if codec == nil {
+		return false
+	}
+
+	// Create hardware device context
+	var hwDeviceCtx *ffmpeg.AVBufferRef
+	ret, _ := ffmpeg.AVHWDeviceCtxCreate(&hwDeviceCtx, deviceType, nil, nil, 0)
+	if ret < 0 || hwDeviceCtx == nil {
+		return false
+	}
+	defer ffmpeg.AVBufferUnref(&hwDeviceCtx)
+
+	// Create codec context
+	codecCtx := ffmpeg.AVCodecAllocContext3(codec)
+	if codecCtx == nil {
+		return false
+	}
+	defer ffmpeg.AVCodecFreeContext(&codecCtx)
+
+	// Configure minimal encoder settings for the test
+	codecCtx.SetWidth(1280)
+	codecCtx.SetHeight(720)
+	codecCtx.SetTimeBase(ffmpeg.AVMakeQ(1, 30))
+	codecCtx.SetFramerate(ffmpeg.AVMakeQ(30, 1))
+
+	// Set pixel format based on encoder type
+	switch accelType {
+	case HWAccelNVENC:
+		// NVENC can accept RGBA directly
+		codecCtx.SetPixFmt(ffmpeg.AVPixFmtRgba)
+		codecCtx.SetHwDeviceCtx(ffmpeg.AVBufferRef_(hwDeviceCtx))
+	case HWAccelVulkan:
+		// Vulkan requires hardware frames context
+		codecCtx.SetPixFmt(ffmpeg.AVPixFmtVulkan)
+
+		// Create hardware frames context
+		hwFramesRef := ffmpeg.AVHWFrameCtxAlloc(hwDeviceCtx)
+		if hwFramesRef == nil {
+			return false
+		}
+		defer ffmpeg.AVBufferUnref(&hwFramesRef)
+
+		// Cast the data pointer to AVHWFramesContext for configuration
+		framesCtx := ffmpeg.ToAVHWFramesContext(hwFramesRef.Data())
+		if framesCtx == nil {
+			return false
+		}
+
+		framesCtx.SetFormat(ffmpeg.AVPixFmtVulkan)
+		framesCtx.SetSwFormat(ffmpeg.AVPixFmtNv12)
+		framesCtx.SetWidth(1280)
+		framesCtx.SetHeight(720)
+
+		ret, _ = ffmpeg.AVHWFrameCtxInit(hwFramesRef)
+		if ret < 0 {
+			return false
+		}
+
+		codecCtx.SetHwFramesCtx(ffmpeg.AVBufferRef_(hwFramesRef))
+	case HWAccelQSV:
+		// QSV requires hardware frames context
+		codecCtx.SetPixFmt(ffmpeg.AVPixFmtQsv)
+		// QSV setup is more complex, just test device availability for now
+		return testHardwareAvailable(deviceType)
+	case HWAccelVideoToolbox:
+		// VideoToolbox can work with device context
+		codecCtx.SetPixFmt(ffmpeg.AVPixFmtVideotoolbox)
+		codecCtx.SetHwDeviceCtx(ffmpeg.AVBufferRef_(hwDeviceCtx))
+	default:
+		return false
+	}
+
+	// Try to open the encoder - this is the definitive test
+	ret, _ = ffmpeg.AVCodecOpen2(codecCtx, codec, nil)
+	if ret < 0 {
+		return false
+	}
+
+	return true
+}
+
 // DetectHWEncoders probes for available hardware encoders
 // Returns a list of detected encoders in priority order
 func DetectHWEncoders() []HWEncoder {
@@ -101,15 +196,10 @@ func DetectHWEncoders() []HWEncoder {
 			Available:   false,
 		}
 
-		// Check if encoder exists in FFmpeg build
-		encoderName := ffmpeg.ToCStr(enc.name)
-		codec := ffmpeg.AVCodecFindEncoderByName(encoderName)
-		encoderName.Free()
-
-		if codec != nil {
-			// Encoder exists, now test if hardware is available
-			encoder.Available = testHardwareAvailable(enc.deviceType)
-		}
+		// Perform comprehensive encoder test - this actually attempts to open
+		// the encoder with proper hardware context, catching cases where the
+		// hardware device exists but doesn't support the specific encoder
+		encoder.Available = testEncoderAvailable(enc.name, enc.deviceType, enc.accelType)
 
 		encoders = append(encoders, encoder)
 	}
