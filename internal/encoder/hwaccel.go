@@ -30,15 +30,18 @@ type HWEncoder struct {
 	Description string // Human-readable description
 }
 
-// linuxEncoderPriority defines the encoder preference order for Linux
-// Priority: nvenc > qsv > vaapi > vulkan > software
-// VAAPI is preferred over Vulkan as it has broader hardware support (AMD, Intel, older Intel)
-var linuxEncoderPriority = []struct {
+// encoderSpec defines a hardware encoder configuration for priority lists
+type encoderSpec struct {
 	name       string
 	accelType  HWAccelType
 	deviceType ffmpeg.AVHWDeviceType
 	desc       string
-}{
+}
+
+// linuxEncoderPriority defines the encoder preference order for Linux
+// Priority: nvenc > qsv > vaapi > vulkan > software
+// VAAPI is preferred over Vulkan as it has broader hardware support (AMD, Intel, older Intel)
+var linuxEncoderPriority = []encoderSpec{
 	{"h264_nvenc", HWAccelNVENC, ffmpeg.AVHWDeviceTypeCuda, "NVIDIA NVENC"},
 	{"h264_qsv", HWAccelQSV, ffmpeg.AVHWDeviceTypeQsv, "Intel Quick Sync Video"},
 	{"h264_vaapi", HWAccelVAAPI, ffmpeg.AVHWDeviceTypeVaapi, "VA-API"},
@@ -47,12 +50,7 @@ var linuxEncoderPriority = []struct {
 
 // macOSEncoderPriority defines the encoder preference order for macOS
 // Priority: videotoolbox > software
-var macOSEncoderPriority = []struct {
-	name       string
-	accelType  HWAccelType
-	deviceType ffmpeg.AVHWDeviceType
-	desc       string
-}{
+var macOSEncoderPriority = []encoderSpec{
 	{"h264_videotoolbox", HWAccelVideoToolbox, ffmpeg.AVHWDeviceTypeVideotoolbox, "Apple VideoToolbox"},
 }
 
@@ -210,12 +208,7 @@ func DetectHWEncoders() []HWEncoder {
 	var encoders []HWEncoder
 
 	// Select encoder list based on OS
-	var priority []struct {
-		name       string
-		accelType  HWAccelType
-		deviceType ffmpeg.AVHWDeviceType
-		desc       string
-	}
+	var priority []encoderSpec
 
 	switch runtime.GOOS {
 	case "darwin":
