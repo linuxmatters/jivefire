@@ -474,10 +474,12 @@ func (e *Encoder) configurePixelFormat() error {
 		}
 
 	case HWAccelVideoToolbox:
-		// VideoToolbox uses device context (similar to NVENC)
+		// VideoToolbox requires hardware frames context with NV12 software format
 		e.inputPixFmt = ffmpeg.AVPixFmtNv12
 		e.videoCodec.SetPixFmt(ffmpeg.AVPixFmtVideotoolbox)
-		e.videoCodec.SetHwDeviceCtx(ffmpeg.AVBufferRef_(e.hwDeviceCtx))
+		if err := e.setupHWFramesContext(ffmpeg.AVPixFmtVideotoolbox); err != nil {
+			return fmt.Errorf("failed to setup VideoToolbox frames context: %w", err)
+		}
 
 	default:
 		return fmt.Errorf("unsupported hardware encoder type: %s", e.hwEncoder.Type)
@@ -607,8 +609,8 @@ func (e *Encoder) WriteFrameRGBA(rgbaData []byte) error {
 		return e.writeFrameRGBADirect(rgbaData)
 	}
 
-	// For Vulkan/QSV/VAAPI, convert RGBA→NV12 then upload to GPU
-	if e.hwEncoder != nil && (e.hwEncoder.Type == HWAccelVulkan || e.hwEncoder.Type == HWAccelQSV || e.hwEncoder.Type == HWAccelVAAPI) {
+	// For Vulkan/QSV/VAAPI/VideoToolbox, convert RGBA→NV12 then upload to GPU
+	if e.hwEncoder != nil && (e.hwEncoder.Type == HWAccelVulkan || e.hwEncoder.Type == HWAccelQSV || e.hwEncoder.Type == HWAccelVAAPI || e.hwEncoder.Type == HWAccelVideoToolbox) {
 		return e.writeFrameHWUpload(rgbaData)
 	}
 

@@ -189,9 +189,13 @@ func testEncoderAvailable(encoderName string, deviceType ffmpeg.AVHWDeviceType, 
 		}
 		defer ffmpeg.AVBufferUnref(&hwFramesRef)
 	case HWAccelVideoToolbox:
-		// VideoToolbox can work with device context
+		// VideoToolbox requires hardware frames context with NV12 software format
 		codecCtx.SetPixFmt(ffmpeg.AVPixFmtVideotoolbox)
-		codecCtx.SetHwDeviceCtx(ffmpeg.AVBufferRef_(hwDeviceCtx))
+		hwFramesRef := setupTestHWFramesContext(hwDeviceCtx, codecCtx, ffmpeg.AVPixFmtVideotoolbox)
+		if hwFramesRef == nil {
+			return false
+		}
+		defer ffmpeg.AVBufferUnref(&hwFramesRef)
 	default:
 		return false
 	}
