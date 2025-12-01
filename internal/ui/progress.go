@@ -10,19 +10,19 @@ import (
 	"github.com/charmbracelet/bubbles/progress"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/linuxmatters/jivefire/internal/cli"
 )
 
-// Fire colour palette 🔥
+// Fire colour palette - import shared colours from cli package
 var (
-	// Core fire colours (dark to bright)
-	fireYellow  = lipgloss.Color("#FFD700") // Bright yellow
-	fireOrange  = lipgloss.Color("#FF8C00") // Deep orange
-	fireRed     = lipgloss.Color("#FF4500") // Orange-red
-	fireCrimson = lipgloss.Color("#DC143C") // Deep crimson
-	emberGlow   = lipgloss.Color("#8B0000") // Dark ember red
+	fireYellow  = cli.FireYellow
+	fireOrange  = cli.FireOrange
+	fireRed     = cli.FireRed
+	fireCrimson = cli.FireCrimson
+	warmGray    = cli.WarmGray
 
-	// Accent colours
-	warmGray = lipgloss.Color("#B8860B") // Dark goldenrod for subtle text
+	// UI-specific colours
+	emberGlow = lipgloss.Color("#8B0000") // Dark ember red
 )
 
 // Phase represents the current processing phase

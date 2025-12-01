@@ -10,38 +10,31 @@ import (
 
 // Custom help styles - fire theme
 var (
-	// Fire colour palette
-	fireYellow  = lipgloss.Color("#FFD700")
-	fireOrange  = lipgloss.Color("#FF8C00")
-	fireRed     = lipgloss.Color("#FF4500")
-	fireCrimson = lipgloss.Color("#DC143C")
-	warmGray    = lipgloss.Color("#B8860B")
-
 	helpTitleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(fireYellow).
+			Foreground(FireYellow).
 			MarginBottom(1)
 
 	helpDescStyle = lipgloss.NewStyle().
-			Foreground(fireOrange).
+			Foreground(FireOrange).
 			Italic(true).
 			MarginBottom(1)
 
 	helpSectionStyle = lipgloss.NewStyle().
 				Bold(true).
-				Foreground(fireOrange).
+				Foreground(FireOrange).
 				MarginTop(1)
 
 	helpFlagStyle = lipgloss.NewStyle().
-			Foreground(fireYellow).
+			Foreground(FireYellow).
 			Bold(true)
 
 	helpArgStyle = lipgloss.NewStyle().
-			Foreground(fireRed).
+			Foreground(FireRed).
 			Bold(true)
 
 	helpDefaultStyle = lipgloss.NewStyle().
-				Foreground(warmGray).
+				Foreground(WarmGray).
 				Italic(true)
 )
 
