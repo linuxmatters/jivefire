@@ -77,6 +77,36 @@ func suppressHWProbeLogging() func() {
 	}
 }
 
+// setupTestHWFramesContext creates and initialises a hardware frames context for
+// encoder capability testing. Used by Vulkan and VA-API which require frames context.
+// Returns the frames reference (caller must defer AVBufferUnref) or nil on failure.
+func setupTestHWFramesContext(hwDeviceCtx *ffmpeg.AVBufferRef, codecCtx *ffmpeg.AVCodecContext, hwFormat ffmpeg.AVPixelFormat) *ffmpeg.AVBufferRef {
+	hwFramesRef := ffmpeg.AVHWFrameCtxAlloc(hwDeviceCtx)
+	if hwFramesRef == nil {
+		return nil
+	}
+
+	framesCtx := ffmpeg.ToAVHWFramesContext(hwFramesRef.Data())
+	if framesCtx == nil {
+		ffmpeg.AVBufferUnref(&hwFramesRef)
+		return nil
+	}
+
+	framesCtx.SetFormat(hwFormat)
+	framesCtx.SetSwFormat(ffmpeg.AVPixFmtNv12)
+	framesCtx.SetWidth(1280)
+	framesCtx.SetHeight(720)
+
+	ret, _ := ffmpeg.AVHWFrameCtxInit(hwFramesRef)
+	if ret < 0 {
+		ffmpeg.AVBufferUnref(&hwFramesRef)
+		return nil
+	}
+
+	codecCtx.SetHwFramesCtx(ffmpeg.AVBufferRef_(hwFramesRef))
+	return hwFramesRef
+}
+
 // testHardwareAvailable tests if a hardware device type is actually available
 // by attempting to create a device context for it.
 func testHardwareAvailable(deviceType ffmpeg.AVHWDeviceType) bool {
@@ -139,31 +169,11 @@ func testEncoderAvailable(encoderName string, deviceType ffmpeg.AVHWDeviceType, 
 	case HWAccelVulkan:
 		// Vulkan requires hardware frames context
 		codecCtx.SetPixFmt(ffmpeg.AVPixFmtVulkan)
-
-		// Create hardware frames context
-		hwFramesRef := ffmpeg.AVHWFrameCtxAlloc(hwDeviceCtx)
+		hwFramesRef := setupTestHWFramesContext(hwDeviceCtx, codecCtx, ffmpeg.AVPixFmtVulkan)
 		if hwFramesRef == nil {
 			return false
 		}
 		defer ffmpeg.AVBufferUnref(&hwFramesRef)
-
-		// Cast the data pointer to AVHWFramesContext for configuration
-		framesCtx := ffmpeg.ToAVHWFramesContext(hwFramesRef.Data())
-		if framesCtx == nil {
-			return false
-		}
-
-		framesCtx.SetFormat(ffmpeg.AVPixFmtVulkan)
-		framesCtx.SetSwFormat(ffmpeg.AVPixFmtNv12)
-		framesCtx.SetWidth(1280)
-		framesCtx.SetHeight(720)
-
-		ret, _ = ffmpeg.AVHWFrameCtxInit(hwFramesRef)
-		if ret < 0 {
-			return false
-		}
-
-		codecCtx.SetHwFramesCtx(ffmpeg.AVBufferRef_(hwFramesRef))
 	case HWAccelQSV:
 		// QSV requires hardware frames context
 		codecCtx.SetPixFmt(ffmpeg.AVPixFmtQsv)
@@ -172,31 +182,11 @@ func testEncoderAvailable(encoderName string, deviceType ffmpeg.AVHWDeviceType, 
 	case HWAccelVAAPI:
 		// VA-API requires hardware frames context
 		codecCtx.SetPixFmt(ffmpeg.AVPixFmtVaapi)
-
-		// Create hardware frames context
-		hwFramesRef := ffmpeg.AVHWFrameCtxAlloc(hwDeviceCtx)
+		hwFramesRef := setupTestHWFramesContext(hwDeviceCtx, codecCtx, ffmpeg.AVPixFmtVaapi)
 		if hwFramesRef == nil {
 			return false
 		}
 		defer ffmpeg.AVBufferUnref(&hwFramesRef)
-
-		// Cast the data pointer to AVHWFramesContext for configuration
-		framesCtx := ffmpeg.ToAVHWFramesContext(hwFramesRef.Data())
-		if framesCtx == nil {
-			return false
-		}
-
-		framesCtx.SetFormat(ffmpeg.AVPixFmtVaapi)
-		framesCtx.SetSwFormat(ffmpeg.AVPixFmtNv12)
-		framesCtx.SetWidth(1280)
-		framesCtx.SetHeight(720)
-
-		ret, _ = ffmpeg.AVHWFrameCtxInit(hwFramesRef)
-		if ret < 0 {
-			return false
-		}
-
-		codecCtx.SetHwFramesCtx(ffmpeg.AVBufferRef_(hwFramesRef))
 	case HWAccelVideoToolbox:
 		// VideoToolbox can work with device context
 		codecCtx.SetPixFmt(ffmpeg.AVPixFmtVideotoolbox)
