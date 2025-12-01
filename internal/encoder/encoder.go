@@ -691,9 +691,6 @@ func (e *Encoder) writeFrameRGBADirect(rgbaData []byte) error {
 	return e.receiveAndWriteVideoPackets()
 }
 
-// writeFrameVulkan converts RGBA to NV12, uploads to Vulkan, and encodes
-// Pipeline: RGBA (CPU) → parallel Go conversion → NV12 (CPU) → AVHWFrameTransferData → Vulkan (GPU) → encode
-// Uses pre-allocated reusable NV12 frame and parallel Go conversion (8.4× faster than SwsScaleFrame)
 // writeFrameHWUpload converts RGBA to NV12, uploads to GPU, and encodes
 // Pipeline: RGBA (CPU) → parallel Go conversion → NV12 (CPU) → AVHWFrameTransferData → GPU → encode
 // Used by Vulkan (h264_vulkan) and QSV (h264_qsv) encoders
