@@ -213,45 +213,9 @@ func (e *Encoder) Initialize() error {
 	e.videoCodec.SetWidth(e.config.Width)
 	e.videoCodec.SetHeight(e.config.Height)
 
-	// Set pixel format based on encoder type
-	// NVENC can accept RGBA directly and do colourspace conversion on GPU
-	// Vulkan/QSV/VAAPI require NV12 uploaded to GPU via hwframes context
-	// Software encoder uses YUV420P (we do RGB→YUV conversion on CPU)
-	if e.hwEncoder != nil && e.hwEncoder.Type == HWAccelNVENC {
-		e.inputPixFmt = ffmpeg.AVPixFmtRgba
-		e.videoCodec.SetPixFmt(ffmpeg.AVPixFmtRgba)
-	} else if e.hwEncoder != nil && e.hwEncoder.Type == HWAccelVulkan {
-		// Vulkan encoder requires hardware frames context with NV12 software format
-		e.inputPixFmt = ffmpeg.AVPixFmtNv12
-		e.videoCodec.SetPixFmt(ffmpeg.AVPixFmtVulkan)
-
-		// Set up hardware frames context for Vulkan
-		if err := e.setupHWFramesContext(ffmpeg.AVPixFmtVulkan); err != nil {
-			return fmt.Errorf("failed to setup Vulkan frames context: %w", err)
-		}
-	} else if e.hwEncoder != nil && e.hwEncoder.Type == HWAccelQSV {
-		// QSV encoder requires hardware frames context with NV12 software format
-		e.inputPixFmt = ffmpeg.AVPixFmtNv12
-		e.videoCodec.SetPixFmt(ffmpeg.AVPixFmtQsv)
-	} else if e.hwEncoder != nil && e.hwEncoder.Type == HWAccelVAAPI {
-		// VA-API encoder requires hardware frames context with NV12 software format
-		e.inputPixFmt = ffmpeg.AVPixFmtNv12
-		e.videoCodec.SetPixFmt(ffmpeg.AVPixFmtVaapi)
-
-		// Set up hardware frames context for VA-API
-		if err := e.setupHWFramesContext(ffmpeg.AVPixFmtVaapi); err != nil {
-			return fmt.Errorf("failed to setup VA-API frames context: %w", err)
-		}
-	} else {
-		e.inputPixFmt = ffmpeg.AVPixFmtYuv420P
-		e.videoCodec.SetPixFmt(ffmpeg.AVPixFmtYuv420P)
-	}
-
-	// Attach hardware device context to codec if using hardware encoding (NVENC only)
-	// Vulkan and QSV use hw_frames_ctx instead of hw_device_ctx
-	if e.hwDeviceCtx != nil && e.hwEncoder != nil && e.hwEncoder.Type == HWAccelNVENC {
-		// Create a new reference to the hw device context for the codec
-		e.videoCodec.SetHwDeviceCtx(ffmpeg.AVBufferRef_(e.hwDeviceCtx))
+	// Configure pixel format and hardware context based on encoder type
+	if err := e.configurePixelFormat(); err != nil {
+		return err
 	}
 
 	// Set time base (1/framerate)
@@ -461,6 +425,62 @@ func (e *Encoder) setupHWFramesContext(hwPixFmt ffmpeg.AVPixelFormat) error {
 	}
 	if ret < 0 {
 		return fmt.Errorf("failed to allocate NV12 buffer: %d", ret)
+	}
+
+	return nil
+}
+
+// configurePixelFormat sets up pixel formats and hardware context based on encoder type.
+// NVENC: accepts RGBA directly, GPU does colourspace conversion
+// Vulkan/QSV/VA-API: require NV12 uploaded to GPU via hardware frames context
+// Software: uses YUV420P with CPU-side RGB→YUV conversion
+func (e *Encoder) configurePixelFormat() error {
+	if e.hwEncoder == nil {
+		// Software encoder (libx264)
+		e.inputPixFmt = ffmpeg.AVPixFmtYuv420P
+		e.videoCodec.SetPixFmt(ffmpeg.AVPixFmtYuv420P)
+		return nil
+	}
+
+	switch e.hwEncoder.Type {
+	case HWAccelNVENC:
+		// NVENC can accept RGBA directly - GPU handles colourspace conversion
+		e.inputPixFmt = ffmpeg.AVPixFmtRgba
+		e.videoCodec.SetPixFmt(ffmpeg.AVPixFmtRgba)
+		e.videoCodec.SetHwDeviceCtx(ffmpeg.AVBufferRef_(e.hwDeviceCtx))
+
+	case HWAccelVulkan:
+		// Vulkan requires hardware frames context with NV12 software format
+		e.inputPixFmt = ffmpeg.AVPixFmtNv12
+		e.videoCodec.SetPixFmt(ffmpeg.AVPixFmtVulkan)
+		if err := e.setupHWFramesContext(ffmpeg.AVPixFmtVulkan); err != nil {
+			return fmt.Errorf("failed to setup Vulkan frames context: %w", err)
+		}
+
+	case HWAccelQSV:
+		// QSV requires hardware frames context with NV12 software format
+		e.inputPixFmt = ffmpeg.AVPixFmtNv12
+		e.videoCodec.SetPixFmt(ffmpeg.AVPixFmtQsv)
+		if err := e.setupHWFramesContext(ffmpeg.AVPixFmtQsv); err != nil {
+			return fmt.Errorf("failed to setup QSV frames context: %w", err)
+		}
+
+	case HWAccelVAAPI:
+		// VA-API requires hardware frames context with NV12 software format
+		e.inputPixFmt = ffmpeg.AVPixFmtNv12
+		e.videoCodec.SetPixFmt(ffmpeg.AVPixFmtVaapi)
+		if err := e.setupHWFramesContext(ffmpeg.AVPixFmtVaapi); err != nil {
+			return fmt.Errorf("failed to setup VA-API frames context: %w", err)
+		}
+
+	case HWAccelVideoToolbox:
+		// VideoToolbox uses device context (similar to NVENC)
+		e.inputPixFmt = ffmpeg.AVPixFmtNv12
+		e.videoCodec.SetPixFmt(ffmpeg.AVPixFmtVideotoolbox)
+		e.videoCodec.SetHwDeviceCtx(ffmpeg.AVBufferRef_(e.hwDeviceCtx))
+
+	default:
+		return fmt.Errorf("unsupported hardware encoder type: %s", e.hwEncoder.Type)
 	}
 
 	return nil
