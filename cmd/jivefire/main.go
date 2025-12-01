@@ -427,31 +427,30 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 		audio.BinFFT(coeffs, sensitivity, profile.OptimalBaseScale, barHeights)
 
 		// CAVA-style auto-sensitivity with soft knee compression
-		const overshootThreshold = 1.0
 		overshootDetected := false
 
 		for i, h := range barHeights {
-			if h > overshootThreshold {
+			if h > config.OvershootThreshold {
 				overshootDetected = true
 				// Apply soft knee compression
-				overshoot := h - overshootThreshold
-				barHeights[i] = overshootThreshold + overshoot*math.Exp(-overshoot/overshootThreshold)
+				overshoot := h - config.OvershootThreshold
+				barHeights[i] = config.OvershootThreshold + overshoot*math.Exp(-overshoot/config.OvershootThreshold)
 			}
 		}
 
 		// Adjust sensitivity
 		if overshootDetected {
-			sensitivity *= 0.985 // 1.5% reduction per frame
+			sensitivity *= config.SensitivityDecay
 		} else {
-			sensitivity *= 1.002 // 0.2% increase per frame
+			sensitivity *= config.SensitivityGrowth
 		}
 
 		// Clamp sensitivity
-		if sensitivity < 0.05 {
-			sensitivity = 0.05
+		if sensitivity < config.SensitivityMin {
+			sensitivity = config.SensitivityMin
 		}
-		if sensitivity > 2.0 {
-			sensitivity = 2.0
+		if sensitivity > config.SensitivityMax {
+			sensitivity = config.SensitivityMax
 		}
 
 		// Scale to pixel space

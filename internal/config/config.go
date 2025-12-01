@@ -42,6 +42,14 @@ const (
 	GravityExponent     = 2.5  // Exponent for framerate scaling
 	GravityBase         = 1.54 // Base gravity multiplier
 	GravityMin          = 1.0  // Minimum gravity modifier (floor)
+
+	// Auto-sensitivity adjustment constants
+	// These control dynamic gain adjustment based on peak detection
+	SensitivityDecay   = 0.985 // Multiplier when overshoot detected (1.5% reduction per frame)
+	SensitivityGrowth  = 1.002 // Multiplier when no overshoot (0.2% increase per frame)
+	SensitivityMin     = 0.05  // Minimum sensitivity floor
+	SensitivityMax     = 2.0   // Maximum sensitivity ceiling
+	OvershootThreshold = 1.0   // Threshold for soft knee compression
 )
 
 // Appearance - Visual styling configuration
