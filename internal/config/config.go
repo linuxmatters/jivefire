@@ -29,10 +29,19 @@ const (
 )
 
 // CAVA algorithm constants
+// These values are derived from the CAVA audio visualiser project
+// https://github.com/karlstav/cava
 const (
 	Framerate      = 30.0
 	NoiseReduction = 0.77  // CAVA default integral smoothing
 	FallAccel      = 0.028 // CAVA gravity acceleration constant
+
+	// Gravity modifier formula: pow(GravityFramerateRef/Framerate, GravityExponent) * GravityBase / NoiseReduction
+	// This scales bar fall speed based on framerate deviation from CAVA's reference 60fps
+	GravityFramerateRef = 60.0 // CAVA reference framerate for gravity calculation
+	GravityExponent     = 2.5  // Exponent for framerate scaling
+	GravityBase         = 1.54 // Base gravity multiplier
+	GravityMin          = 1.0  // Minimum gravity modifier (floor)
 )
 
 // Appearance - Visual styling configuration

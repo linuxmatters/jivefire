@@ -362,9 +362,10 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 	rearrangedHeights := make([]float64, config.NumBars)
 
 	// Calculate gravity modifier (CAVA formula)
-	gravityMod := math.Pow(60.0/config.Framerate, 2.5) * 1.54 / config.NoiseReduction
-	if gravityMod < 1.0 {
-		gravityMod = 1.0
+	// Scales bar fall speed based on framerate deviation from CAVA's reference 60fps
+	gravityMod := math.Pow(config.GravityFramerateRef/config.Framerate, config.GravityExponent) * config.GravityBase / config.NoiseReduction
+	if gravityMod < config.GravityMin {
+		gravityMod = config.GravityMin
 	}
 
 	// Auto-sensitivity adjustment (CAVA-style)
