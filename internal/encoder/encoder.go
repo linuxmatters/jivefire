@@ -358,10 +358,15 @@ func (e *Encoder) setHWEncoderOptions(opts **ffmpeg.AVDictionary) error {
 		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("bf"), ffmpeg.ToCStr("0"), 0)
 
 	case HWAccelVideoToolbox:
-		// Apple VideoToolbox options
+		// Apple VideoToolbox options optimised for fast visualisation encoding
+		// Note: VideoToolbox does not support constant quality (CRF/CQ) encoding.
+		// It uses bitrate-based rate control only, so we cannot set quality levels
+		// like other hardware encoders. The encoder will use default VBR settings.
 		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("profile"), ffmpeg.ToCStr("main"), 0)
 		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("level"), ffmpeg.ToCStr("4.1"), 0)
-		// Allow hardware frame types
+		// Real-time encoding hint - prioritises speed for live/visualisation use
+		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("realtime"), ffmpeg.ToCStr("1"), 0)
+		// Require hardware encoding - fail if hardware unavailable
 		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("allow_sw"), ffmpeg.ToCStr("0"), 0)
 	}
 
