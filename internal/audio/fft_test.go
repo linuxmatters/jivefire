@@ -289,3 +289,155 @@ func TestApplyHanning_WindowProperties(t *testing.T) {
 	t.Logf("Hanning window verified: start=%.15f, center=%.6f, end=%.15f",
 		windowed[0], windowed[size/2], windowed[size-1])
 }
+
+// TestRearrangeFrequenciesCenterOut_Symmetry verifies that the output array
+// is perfectly symmetric around the center index. This catches off-by-one
+// errors in the mirroring logic that would produce visually jarring
+// asymmetric bar output.
+func TestRearrangeFrequenciesCenterOut_Symmetry(t *testing.T) {
+	numBars := 64
+	center := numBars / 2
+
+	// Create input with distinct values (0-31 ascending)
+	input := make([]float64, numBars)
+	for i := 0; i < numBars; i++ {
+		input[i] = float64(i)
+	}
+
+	result := make([]float64, numBars)
+	RearrangeFrequenciesCenterOut(input, result)
+
+	// Verify perfect symmetry around center
+	for i := 0; i < center; i++ {
+		leftIdx := center - 1 - i
+		rightIdx := center + i
+
+		if leftIdx < 0 || rightIdx >= numBars {
+			t.Fatalf("Index out of bounds: left=%d, right=%d", leftIdx, rightIdx)
+		}
+
+		if result[leftIdx] != result[rightIdx] {
+			t.Errorf("Symmetry violation at offset %d: result[%d]=%.0f != result[%d]=%.0f",
+				i, leftIdx, result[leftIdx], rightIdx, result[rightIdx])
+		}
+	}
+
+	t.Logf("Symmetry verified for all %d bar pairs", center)
+}
+
+// TestRearrangeFrequenciesCenterOut_ExpectedMapping verifies that frequencies
+// are placed correctly with bass (low frequencies) at center and highs at edges.
+func TestRearrangeFrequenciesCenterOut_ExpectedMapping(t *testing.T) {
+	numBars := 64
+	center := numBars / 2
+
+	// Create input representing increasing frequency (bar 0 = lowest, 31 = highest)
+	// After rearrangement: lowest frequencies should be at center, highest at edges
+	input := make([]float64, numBars)
+	for i := 0; i < numBars; i++ {
+		input[i] = float64(i)
+	}
+
+	result := make([]float64, numBars)
+	RearrangeFrequenciesCenterOut(input, result)
+
+	// Verify that bass (input bar 0) is at center
+	if result[center-1] != 0 || result[center] != 0 {
+		t.Errorf("Bass frequencies not at center: result[%d]=%.0f, result[%d]=%.0f",
+			center-1, result[center-1], center, result[center])
+	}
+
+	// Verify that highs (input bar 31) are at edges
+	if result[0] != 31 || result[numBars-1] != 31 {
+		t.Errorf("High frequencies not at edges: result[0]=%.0f, result[%d]=%.0f",
+			result[0], numBars-1, result[numBars-1])
+	}
+
+	t.Logf("Frequency mapping verified: bass at center, highs at edges")
+}
+
+// TestRearrangeFrequenciesCenterOut_EdgeCases tests boundary conditions.
+func TestRearrangeFrequenciesCenterOut_EdgeCases(t *testing.T) {
+	testCases := []struct {
+		name   string
+		size   int
+		values []float64
+	}{
+		{
+			name:   "Minimum valid size (2 bars)",
+			size:   2,
+			values: []float64{1.0, 2.0},
+		},
+		{
+			name:   "Single zero in input",
+			size:   8,
+			values: []float64{0, 1, 2, 3, 4, 5, 6, 7},
+		},
+		{
+			name:   "All same values",
+			size:   8,
+			values: []float64{5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0},
+		},
+		{
+			name:   "Alternating pattern",
+			size:   8,
+			values: []float64{1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			input := make([]float64, tc.size)
+			copy(input, tc.values)
+
+			result := make([]float64, tc.size)
+			RearrangeFrequenciesCenterOut(input, result)
+
+			// Verify symmetry for this case
+			center := tc.size / 2
+			for i := 0; i < center; i++ {
+				leftIdx := center - 1 - i
+				rightIdx := center + i
+
+				if result[leftIdx] != result[rightIdx] {
+					t.Errorf("Symmetry violation: result[%d]=%.0f != result[%d]=%.0f",
+						leftIdx, result[leftIdx], rightIdx, result[rightIdx])
+				}
+			}
+		})
+	}
+}
+
+// TestRearrangeFrequenciesCenterOut_SmallInput tests with minimal input size.
+func TestRearrangeFrequenciesCenterOut_SmallInput(t *testing.T) {
+	// Test the example from PLAN.md: [1,2,3,4] → symmetric output
+	input := []float64{1, 2, 3, 4}
+	result := make([]float64, 4)
+
+	RearrangeFrequenciesCenterOut(input, result)
+
+	// Expected mapping for 4-bar input:
+	// Input bars:    [0, 1, 2, 3] with values [1, 2, 3, 4]
+	// Center index: 2
+	// Output should be symmetric:
+	//   - Bars 0-1 mirrored from center going left (1 and 2)
+	//   - Bars 2-3 mirrored from center going right (1 and 2)
+	// Expected result: [input[1], input[0], input[0], input[1]] = [2, 1, 1, 2]
+
+	expected := []float64{2, 1, 1, 2}
+	for i, v := range result {
+		if v != expected[i] {
+			t.Errorf("Index %d: got %.0f, want %.0f", i, v, expected[i])
+		}
+	}
+
+	// Verify symmetry
+	if result[0] != result[3] {
+		t.Errorf("Symmetry check: result[0]=%.0f != result[3]=%.0f", result[0], result[3])
+	}
+	if result[1] != result[2] {
+		t.Errorf("Symmetry check: result[1]=%.0f != result[2]=%.0f", result[1], result[2])
+	}
+
+	t.Logf("Small input test passed: %v → %v", input, result)
+}
