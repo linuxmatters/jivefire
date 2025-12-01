@@ -175,8 +175,11 @@ func testEncoderAvailable(encoderName string, deviceType ffmpeg.AVHWDeviceType, 
 	case HWAccelQSV:
 		// QSV requires hardware frames context
 		codecCtx.SetPixFmt(ffmpeg.AVPixFmtQsv)
-		// QSV setup is more complex, just test device availability for now
-		return testHardwareAvailable(deviceType)
+		hwFramesRef := setupTestHWFramesContext(hwDeviceCtx, codecCtx, ffmpeg.AVPixFmtQsv)
+		if hwFramesRef == nil {
+			return false
+		}
+		defer ffmpeg.AVBufferUnref(&hwFramesRef)
 	case HWAccelVAAPI:
 		// VA-API requires hardware frames context
 		codecCtx.SetPixFmt(ffmpeg.AVPixFmtVaapi)
