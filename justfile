@@ -213,7 +213,8 @@ bench-encoders: build
 
 # Record gif
 vhs: build
-    @vhs ./jivefire.tape
+    # unset LD_LIBRARY_PATH to avoid ttyd/libwebsockets conflicts with GPU drivers
+    @env -u LD_LIBRARY_PATH vhs ./jivefire.tape
 
 # Test encoder
 test-encoder: build

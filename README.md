@@ -16,7 +16,8 @@ Your podcast audio deserves more than a static image on YouTube. Jivefire transf
   - 🪞 **Symmetric mirroring** above and below centre, doubles the visual impact
   - 🔬 **FFT-based analysis** 2048-point Hanning window, log scale frequency binning
   - ✨ **Smooth decay animation** à la CAVA-bars rise fast, fall gracefully
-- 🚀 **Stupidly fast** streaming pipeline, parallel RGB->YUV and hardware acceleration
+- 🚀 **Stupidly fast** streaming pipeline, parallel RGB→YUV conversion
+  - ⚡ **GPU acceleration** auto-detected: NVENC, Vulkan, VA-API, QuickSync, VideoToolbox
 - 📦 **Single binary** No Python. No FFmpeg install required. Just drop and render
   - 🐧 **Linux** (amd64 and aarch64)
   - 🍏 **macOS** (x86 and Apple Silicon)

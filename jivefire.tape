@@ -58,7 +58,6 @@
 Output .github/jivefire.gif
 
 Require ./jivefire
-Require ./testdata/LMP0.flac
 
 Set Shell "fish"
 Set FontSize 13

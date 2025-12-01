@@ -139,7 +139,7 @@ cmd/jivefire/main.go         → CLI entry, 2-pass coordinator
 internal/audio/              → FFmpegDecoder (AudioDecoder interface), FFT analysis
 internal/encoder/            → ffmpeg-statigo wrapper, RGB→YUV conversion, FIFO buffer
   ├─ encoder.go              → Video/audio encoding, frame submission
-  ├─ hwaccel.go              → Hardware encoder detection (NVENC, QSV, VideoToolbox)
+  ├─ hwaccel.go              → Hardware encoder detection (NVENC, QSV, VA-API, Vulkan, VideoToolbox)
   └─ frame.go                → RGB→YUV420P parallelised conversion (software path)
 internal/renderer/           → Frame generation, bar drawing, thumbnail
 internal/ui/                 → Bubbletea TUI (unified progress.go for both passes)
