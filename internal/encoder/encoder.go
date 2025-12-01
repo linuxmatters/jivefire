@@ -8,6 +8,19 @@ import (
 	ffmpeg "github.com/linuxmatters/ffmpeg-statigo"
 )
 
+// checkFFmpeg provides consistent error handling for FFmpeg API calls.
+// It checks both the Go error (binding issues) and the return code (FFmpeg errors).
+// The op parameter should describe the operation, e.g. "allocate output context".
+func checkFFmpeg(ret int, err error, op string) error {
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+	if ret < 0 {
+		return fmt.Errorf("%s: %w", op, ffmpeg.WrapErr(ret))
+	}
+	return nil
+}
+
 // Config holds the encoder configuration
 type Config struct {
 	OutputPath    string      // Path to output MP4 file
@@ -129,11 +142,8 @@ func (e *Encoder) Initialize() error {
 
 	// Allocate output format context
 	ret, err := ffmpeg.AVFormatAllocOutputContext2(&e.formatCtx, nil, nil, outputPath)
-	if err != nil {
-		return fmt.Errorf("failed to allocate output context: %w", err)
-	}
-	if ret < 0 {
-		return fmt.Errorf("failed to allocate output context: %d", ret)
+	if err := checkFFmpeg(ret, err, "allocate output context"); err != nil {
+		return err
 	}
 
 	// Select encoder based on hardware acceleration preference
@@ -259,30 +269,21 @@ func (e *Encoder) Initialize() error {
 
 	// Open codec with options
 	ret, err = ffmpeg.AVCodecOpen2(e.videoCodec, codec, &opts)
-	if err != nil {
-		return fmt.Errorf("failed to open codec: %w", err)
-	}
-	if ret < 0 {
-		return fmt.Errorf("failed to open codec: %d", ret)
+	if err := checkFFmpeg(ret, err, "open codec"); err != nil {
+		return err
 	}
 
 	// Copy codec parameters to stream
 	ret, err = ffmpeg.AVCodecParametersFromContext(e.videoStream.Codecpar(), e.videoCodec)
-	if err != nil {
-		return fmt.Errorf("failed to copy codec parameters: %w", err)
-	}
-	if ret < 0 {
-		return fmt.Errorf("failed to copy codec parameters: %d", ret)
+	if err := checkFFmpeg(ret, err, "copy codec parameters"); err != nil {
+		return err
 	}
 
 	// Open output file
 	var pb *ffmpeg.AVIOContext
 	ret, err = ffmpeg.AVIOOpen(&pb, outputPath, ffmpeg.AVIOFlagWrite)
-	if err != nil {
-		return fmt.Errorf("failed to open output file: %w", err)
-	}
-	if ret < 0 {
-		return fmt.Errorf("failed to open output file: %d", ret)
+	if err := checkFFmpeg(ret, err, "open output file"); err != nil {
+		return err
 	}
 	e.formatCtx.SetPb(pb)
 
@@ -295,11 +296,8 @@ func (e *Encoder) Initialize() error {
 
 	// Write file header
 	ret, err = ffmpeg.AVFormatWriteHeader(e.formatCtx, nil)
-	if err != nil {
-		return fmt.Errorf("failed to write header: %w", err)
-	}
-	if ret < 0 {
-		return fmt.Errorf("failed to write header: %d", ret)
+	if err := checkFFmpeg(ret, err, "write header"); err != nil {
+		return err
 	}
 
 	return nil
@@ -404,11 +402,8 @@ func (e *Encoder) setupHWFramesContext(hwPixFmt ffmpeg.AVPixelFormat) error {
 
 	// Initialize the frames context
 	ret, err := ffmpeg.AVHWFrameCtxInit(hwFramesRef)
-	if err != nil {
-		return fmt.Errorf("failed to initialize hardware frames context: %w", err)
-	}
-	if ret < 0 {
-		return fmt.Errorf("failed to initialize hardware frames context: %d", ret)
+	if err := checkFFmpeg(ret, err, "initialize hardware frames context"); err != nil {
+		return err
 	}
 
 	// Attach frames context to the video encoder
@@ -424,11 +419,8 @@ func (e *Encoder) setupHWFramesContext(hwPixFmt ffmpeg.AVPixelFormat) error {
 	e.hwNV12Frame.SetFormat(int(ffmpeg.AVPixFmtNv12))
 
 	ret, err = ffmpeg.AVFrameGetBuffer(e.hwNV12Frame, 0)
-	if err != nil {
-		return fmt.Errorf("failed to allocate NV12 buffer: %w", err)
-	}
-	if ret < 0 {
-		return fmt.Errorf("failed to allocate NV12 buffer: %d", ret)
+	if err := checkFFmpeg(ret, err, "allocate NV12 buffer"); err != nil {
+		return err
 	}
 
 	return nil
@@ -555,19 +547,13 @@ func (e *Encoder) initializeAudioEncoder() error {
 	e.audioStream.SetTimeBase(ffmpeg.AVMakeQ(1, e.audioCodec.SampleRate()))
 
 	ret, err := ffmpeg.AVCodecOpen2(e.audioCodec, audioEncoder, nil)
-	if err != nil {
-		return fmt.Errorf("failed to open audio encoder: %w", err)
-	}
-	if ret < 0 {
-		return fmt.Errorf("failed to open audio encoder: %d", ret)
+	if err := checkFFmpeg(ret, err, "open audio encoder"); err != nil {
+		return err
 	}
 
 	ret, err = ffmpeg.AVCodecParametersFromContext(e.audioStream.Codecpar(), e.audioCodec)
-	if err != nil {
-		return fmt.Errorf("failed to copy audio encoder parameters: %w", err)
-	}
-	if ret < 0 {
-		return fmt.Errorf("failed to copy audio encoder parameters: %d", ret)
+	if err := checkFFmpeg(ret, err, "copy audio encoder parameters"); err != nil {
+		return err
 	}
 
 	// Allocate encoder frame only (no decoder needed)
@@ -590,8 +576,8 @@ func (e *Encoder) initializeAudioEncoder() error {
 	e.audioEncFrame.SetSampleRate(e.audioCodec.SampleRate())
 
 	ret, err = ffmpeg.AVFrameGetBuffer(e.audioEncFrame, 0)
-	if err != nil {
-		return fmt.Errorf("failed to allocate encoder frame buffer: %w", err)
+	if err := checkFFmpeg(ret, err, "allocate encoder frame buffer"); err != nil {
+		return err
 	}
 
 	return nil
@@ -652,11 +638,8 @@ func (e *Encoder) writeFrameRGBADirect(rgbaData []byte) error {
 	rgbaFrame.SetFormat(int(ffmpeg.AVPixFmtRgba))
 
 	ret, err := ffmpeg.AVFrameGetBuffer(rgbaFrame, 0)
-	if err != nil {
-		return fmt.Errorf("failed to allocate RGBA buffer: %w", err)
-	}
-	if ret < 0 {
-		return fmt.Errorf("failed to allocate RGBA buffer: %d", ret)
+	if err := checkFFmpeg(ret, err, "allocate RGBA buffer"); err != nil {
+		return err
 	}
 
 	// Copy RGBA data to frame
@@ -680,11 +663,8 @@ func (e *Encoder) writeFrameRGBADirect(rgbaData []byte) error {
 
 	// Send frame to encoder
 	ret, err = ffmpeg.AVCodecSendFrame(e.videoCodec, rgbaFrame)
-	if err != nil {
-		return fmt.Errorf("failed to send frame to encoder: %w", err)
-	}
-	if ret < 0 {
-		return fmt.Errorf("failed to send frame to encoder: %d", ret)
+	if err := checkFFmpeg(ret, err, "send frame to encoder"); err != nil {
+		return err
 	}
 
 	// Receive and write encoded packets
@@ -717,20 +697,14 @@ func (e *Encoder) writeFrameHWUpload(rgbaData []byte) error {
 
 	// Get buffer from hardware frames context pool
 	ret, err := ffmpeg.AVHWFrameGetBuffer(e.hwFramesCtx, hwFrame, 0)
-	if err != nil {
-		return fmt.Errorf("failed to get hardware frame buffer: %w", err)
-	}
-	if ret < 0 {
-		return fmt.Errorf("failed to get hardware frame buffer: %d", ret)
+	if err := checkFFmpeg(ret, err, "get hardware frame buffer"); err != nil {
+		return err
 	}
 
 	// Upload NV12 frame to GPU memory
 	ret, err = ffmpeg.AVHWFrameTransferData(hwFrame, nv12Frame, 0)
-	if err != nil {
-		return fmt.Errorf("failed to upload frame to GPU: %w", err)
-	}
-	if ret < 0 {
-		return fmt.Errorf("failed to upload frame to GPU: %d", ret)
+	if err := checkFFmpeg(ret, err, "upload frame to GPU"); err != nil {
+		return err
 	}
 
 	// Copy frame properties for encoder
@@ -739,11 +713,8 @@ func (e *Encoder) writeFrameHWUpload(rgbaData []byte) error {
 
 	// Send hardware frame to encoder
 	ret, err = ffmpeg.AVCodecSendFrame(e.videoCodec, hwFrame)
-	if err != nil {
-		return fmt.Errorf("failed to send frame to hardware encoder: %w", err)
-	}
-	if ret < 0 {
-		return fmt.Errorf("failed to send frame to hardware encoder: %d", ret)
+	if err := checkFFmpeg(ret, err, "send frame to hardware encoder"); err != nil {
+		return err
 	}
 
 	// Receive and write encoded packets
@@ -770,11 +741,8 @@ func (e *Encoder) WriteFrame(rgbData []byte) error {
 	yuvFrame.SetFormat(int(ffmpeg.AVPixFmtYuv420P))
 
 	ret, err := ffmpeg.AVFrameGetBuffer(yuvFrame, 0)
-	if err != nil {
-		return fmt.Errorf("failed to allocate YUV buffer: %w", err)
-	}
-	if ret < 0 {
-		return fmt.Errorf("failed to allocate YUV buffer: %d", ret)
+	if err := checkFFmpeg(ret, err, "allocate YUV buffer"); err != nil {
+		return err
 	}
 
 	// Convert RGB to YUV420p using stdlib-optimized implementation
@@ -788,11 +756,8 @@ func (e *Encoder) WriteFrame(rgbData []byte) error {
 
 	// Send frame to encoder
 	ret, err = ffmpeg.AVCodecSendFrame(e.videoCodec, yuvFrame)
-	if err != nil {
-		return fmt.Errorf("failed to send frame to encoder: %w", err)
-	}
-	if ret < 0 {
-		return fmt.Errorf("failed to send frame to encoder: %d", ret)
+	if err := checkFFmpeg(ret, err, "send frame to encoder"); err != nil {
+		return err
 	}
 
 	// Receive and write encoded packets
@@ -800,13 +765,13 @@ func (e *Encoder) WriteFrame(rgbData []byte) error {
 		pkt := ffmpeg.AVPacketAlloc()
 
 		ret, err := ffmpeg.AVCodecReceivePacket(e.videoCodec, pkt)
-		if err != nil || errors.Is(err, ffmpeg.EAgain) || errors.Is(err, ffmpeg.AVErrorEOF) {
+		if err != nil {
 			ffmpeg.AVPacketFree(&pkt)
-			break
-		}
-		if ret < 0 {
-			ffmpeg.AVPacketFree(&pkt)
-			return fmt.Errorf("failed to receive packet: %d", ret)
+			// EAGAIN and EOF are expected - means no more packets available
+			if errors.Is(err, ffmpeg.EAgain) || errors.Is(err, ffmpeg.AVErrorEOF) {
+				break
+			}
+			return fmt.Errorf("receive packet: %w", err)
 		}
 
 		// Set stream index and rescale timestamps
@@ -817,11 +782,8 @@ func (e *Encoder) WriteFrame(rgbData []byte) error {
 		ret, err = ffmpeg.AVInterleavedWriteFrame(e.formatCtx, pkt)
 		ffmpeg.AVPacketFree(&pkt)
 
-		if err != nil {
-			return fmt.Errorf("failed to write packet: %w", err)
-		}
-		if ret < 0 {
-			return fmt.Errorf("failed to write packet: %d", ret)
+		if err := checkFFmpeg(ret, err, "write packet"); err != nil {
+			return err
 		}
 	}
 
@@ -834,13 +796,13 @@ func (e *Encoder) receiveAndWriteVideoPackets() error {
 		pkt := ffmpeg.AVPacketAlloc()
 
 		ret, err := ffmpeg.AVCodecReceivePacket(e.videoCodec, pkt)
-		if err != nil || errors.Is(err, ffmpeg.EAgain) || errors.Is(err, ffmpeg.AVErrorEOF) {
+		if err != nil {
 			ffmpeg.AVPacketFree(&pkt)
-			break
-		}
-		if ret < 0 {
-			ffmpeg.AVPacketFree(&pkt)
-			return fmt.Errorf("failed to receive packet: %d", ret)
+			// EAGAIN and EOF are expected - means no more packets available
+			if errors.Is(err, ffmpeg.EAgain) || errors.Is(err, ffmpeg.AVErrorEOF) {
+				break
+			}
+			return fmt.Errorf("receive packet: %w", err)
 		}
 
 		// Set stream index and rescale timestamps
@@ -851,11 +813,8 @@ func (e *Encoder) receiveAndWriteVideoPackets() error {
 		ret, err = ffmpeg.AVInterleavedWriteFrame(e.formatCtx, pkt)
 		ffmpeg.AVPacketFree(&pkt)
 
-		if err != nil {
-			return fmt.Errorf("failed to write packet: %w", err)
-		}
-		if ret < 0 {
-			return fmt.Errorf("failed to write packet: %d", ret)
+		if err := checkFFmpeg(ret, err, "write packet"); err != nil {
+			return err
 		}
 	}
 
@@ -907,24 +866,21 @@ func (e *Encoder) WriteAudioSamples(samples []float32) error {
 
 		// Send to encoder
 		ret, err := ffmpeg.AVCodecSendFrame(e.audioCodec, e.audioEncFrame)
-		if err != nil {
-			return fmt.Errorf("failed to send audio frame to encoder: %w", err)
-		}
-		if ret < 0 {
-			return fmt.Errorf("failed to send audio frame to encoder: %d", ret)
+		if err := checkFFmpeg(ret, err, "send audio frame to encoder"); err != nil {
+			return err
 		}
 
 		// Receive encoded packets
 		for {
 			encodedPkt := ffmpeg.AVPacketAlloc()
 			ret, err = ffmpeg.AVCodecReceivePacket(e.audioCodec, encodedPkt)
-			if err != nil || errors.Is(err, ffmpeg.EAgain) || errors.Is(err, ffmpeg.AVErrorEOF) {
+			if err != nil {
 				ffmpeg.AVPacketFree(&encodedPkt)
-				break
-			}
-			if ret < 0 {
-				ffmpeg.AVPacketFree(&encodedPkt)
-				return fmt.Errorf("failed to receive audio packet from encoder: %d", ret)
+				// EAGAIN and EOF are expected - means no more packets available
+				if errors.Is(err, ffmpeg.EAgain) || errors.Is(err, ffmpeg.AVErrorEOF) {
+					break
+				}
+				return fmt.Errorf("receive audio packet from encoder: %w", err)
 			}
 
 			// Set stream index and timestamps
@@ -934,8 +890,8 @@ func (e *Encoder) WriteAudioSamples(samples []float32) error {
 			// Write packet to output
 			ret, err = ffmpeg.AVInterleavedWriteFrame(e.formatCtx, encodedPkt)
 			ffmpeg.AVPacketFree(&encodedPkt)
-			if err != nil {
-				return fmt.Errorf("failed to write audio packet: %w", err)
+			if err := checkFFmpeg(ret, err, "write audio packet"); err != nil {
+				return err
 			}
 		}
 	}
@@ -982,11 +938,8 @@ func (e *Encoder) FlushAudioEncoder() error {
 		e.nextAudioPts += int64(encoderFrameSize)
 
 		ret, err := ffmpeg.AVCodecSendFrame(e.audioCodec, e.audioEncFrame)
-		if err != nil {
-			return fmt.Errorf("failed to send final audio frame: %w", err)
-		}
-		if ret < 0 {
-			return fmt.Errorf("failed to send final audio frame: %d", ret)
+		if err := checkFFmpeg(ret, err, "send final audio frame"); err != nil {
+			return err
 		}
 	}
 
@@ -996,12 +949,8 @@ func (e *Encoder) FlushAudioEncoder() error {
 	// Receive all remaining packets
 	for {
 		encodedPkt := ffmpeg.AVPacketAlloc()
-		ret, err := ffmpeg.AVCodecReceivePacket(e.audioCodec, encodedPkt)
-		if err != nil || errors.Is(err, ffmpeg.EAgain) || errors.Is(err, ffmpeg.AVErrorEOF) {
-			ffmpeg.AVPacketFree(&encodedPkt)
-			break
-		}
-		if ret < 0 {
+		_, err := ffmpeg.AVCodecReceivePacket(e.audioCodec, encodedPkt)
+		if err != nil {
 			ffmpeg.AVPacketFree(&encodedPkt)
 			break
 		}
