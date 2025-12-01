@@ -56,25 +56,32 @@ var macOSEncoderPriority = []struct {
 	{"h264_videotoolbox", HWAccelVideoToolbox, ffmpeg.AVHWDeviceTypeVideotoolbox, "Apple VideoToolbox"},
 }
 
-// testHardwareAvailable tests if a hardware device type is actually available
-// by attempting to create a device context for it.
-func testHardwareAvailable(deviceType ffmpeg.AVHWDeviceType) bool {
-	// Save current log level and temporarily silence FFmpeg logs
-	// to avoid error messages for unavailable hardware
+// suppressHWProbeLogging temporarily silences FFmpeg and libva logging during
+// hardware probing. Returns a cleanup function that restores the original state.
+func suppressHWProbeLogging() func() {
+	// Save and silence FFmpeg logs
 	oldLevel, _ := ffmpeg.AVLogGetLevel()
 	ffmpeg.AVLogSetLevel(ffmpeg.AVLogQuiet)
-	defer ffmpeg.AVLogSetLevel(oldLevel)
 
-	// Suppress libva messages (VA-API has its own logging separate from FFmpeg)
+	// Save and silence libva logs (VA-API has its own logging separate from FFmpeg)
 	oldLibvaLevel := os.Getenv("LIBVA_MESSAGING_LEVEL")
 	os.Setenv("LIBVA_MESSAGING_LEVEL", "0")
-	defer func() {
+
+	return func() {
+		ffmpeg.AVLogSetLevel(oldLevel)
 		if oldLibvaLevel == "" {
 			os.Unsetenv("LIBVA_MESSAGING_LEVEL")
 		} else {
 			os.Setenv("LIBVA_MESSAGING_LEVEL", oldLibvaLevel)
 		}
-	}()
+	}
+}
+
+// testHardwareAvailable tests if a hardware device type is actually available
+// by attempting to create a device context for it.
+func testHardwareAvailable(deviceType ffmpeg.AVHWDeviceType) bool {
+	restoreLogging := suppressHWProbeLogging()
+	defer restoreLogging()
 
 	var hwDeviceCtx *ffmpeg.AVBufferRef
 	ret, _ := ffmpeg.AVHWDeviceCtxCreate(&hwDeviceCtx, deviceType, nil, nil, 0)
@@ -91,21 +98,8 @@ func testHardwareAvailable(deviceType ffmpeg.AVHWDeviceType) bool {
 // where a hardware device exists but doesn't support the specific encoder
 // (e.g., Intel iGPU with Vulkan but no Vulkan Video encoding support).
 func testEncoderAvailable(encoderName string, deviceType ffmpeg.AVHWDeviceType, accelType HWAccelType) bool {
-	// Save current log level and temporarily silence FFmpeg logs
-	oldLevel, _ := ffmpeg.AVLogGetLevel()
-	ffmpeg.AVLogSetLevel(ffmpeg.AVLogQuiet)
-	defer ffmpeg.AVLogSetLevel(oldLevel)
-
-	// Suppress libva messages (VA-API has its own logging separate from FFmpeg)
-	oldLibvaLevel := os.Getenv("LIBVA_MESSAGING_LEVEL")
-	os.Setenv("LIBVA_MESSAGING_LEVEL", "0")
-	defer func() {
-		if oldLibvaLevel == "" {
-			os.Unsetenv("LIBVA_MESSAGING_LEVEL")
-		} else {
-			os.Setenv("LIBVA_MESSAGING_LEVEL", oldLibvaLevel)
-		}
-	}()
+	restoreLogging := suppressHWProbeLogging()
+	defer restoreLogging()
 
 	// Find the encoder
 	encName := ffmpeg.ToCStr(encoderName)
