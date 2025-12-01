@@ -105,22 +105,6 @@ func setupTestHWFramesContext(hwDeviceCtx *ffmpeg.AVBufferRef, codecCtx *ffmpeg.
 	return hwFramesRef
 }
 
-// testHardwareAvailable tests if a hardware device type is actually available
-// by attempting to create a device context for it.
-func testHardwareAvailable(deviceType ffmpeg.AVHWDeviceType) bool {
-	restoreLogging := suppressHWProbeLogging()
-	defer restoreLogging()
-
-	var hwDeviceCtx *ffmpeg.AVBufferRef
-	ret, _ := ffmpeg.AVHWDeviceCtxCreate(&hwDeviceCtx, deviceType, nil, nil, 0)
-	if ret == 0 && hwDeviceCtx != nil {
-		// Successfully created - hardware is available
-		ffmpeg.AVBufferUnref(&hwDeviceCtx)
-		return true
-	}
-	return false
-}
-
 // testEncoderAvailable performs a full encoder capability test by attempting to
 // configure and open the encoder with proper hardware context. This catches cases
 // where a hardware device exists but doesn't support the specific encoder
