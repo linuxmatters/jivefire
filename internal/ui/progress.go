@@ -602,6 +602,7 @@ func (m *Model) renderComplete() string {
 		otherLabel := "Runtime:"
 		if strings.Contains(m.complete.EncoderName, "nvenc") ||
 			strings.Contains(m.complete.EncoderName, "vulkan") ||
+			strings.Contains(m.complete.EncoderName, "vaapi") ||
 			strings.Contains(m.complete.EncoderName, "qsv") ||
 			strings.Contains(m.complete.EncoderName, "videotoolbox") {
 			otherLabel = "GPU pipeline:"
