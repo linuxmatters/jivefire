@@ -215,7 +215,7 @@ func (e *Encoder) Initialize() error {
 
 	// Set pixel format based on encoder type
 	// NVENC can accept RGBA directly and do colourspace conversion on GPU
-	// Vulkan/QSV require NV12 uploaded to GPU via hwframes context
+	// Vulkan/QSV/VAAPI require NV12 uploaded to GPU via hwframes context
 	// Software encoder uses YUV420P (we do RGB→YUV conversion on CPU)
 	if e.hwEncoder != nil && e.hwEncoder.Type == HWAccelNVENC {
 		e.inputPixFmt = ffmpeg.AVPixFmtRgba
@@ -233,6 +233,15 @@ func (e *Encoder) Initialize() error {
 		// QSV encoder requires hardware frames context with NV12 software format
 		e.inputPixFmt = ffmpeg.AVPixFmtNv12
 		e.videoCodec.SetPixFmt(ffmpeg.AVPixFmtQsv)
+	} else if e.hwEncoder != nil && e.hwEncoder.Type == HWAccelVAAPI {
+		// VA-API encoder requires hardware frames context with NV12 software format
+		e.inputPixFmt = ffmpeg.AVPixFmtNv12
+		e.videoCodec.SetPixFmt(ffmpeg.AVPixFmtVaapi)
+
+		// Set up hardware frames context for VA-API
+		if err := e.setupHWFramesContext(ffmpeg.AVPixFmtVaapi); err != nil {
+			return fmt.Errorf("failed to setup VA-API frames context: %w", err)
+		}
 	} else {
 		e.inputPixFmt = ffmpeg.AVPixFmtYuv420P
 		e.videoCodec.SetPixFmt(ffmpeg.AVPixFmtYuv420P)
@@ -375,6 +384,15 @@ func (e *Encoder) setHWEncoderOptions(opts **ffmpeg.AVDictionary) error {
 		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("profile"), ffmpeg.ToCStr("main"), 0)
 		// Minimal B-frame depth (1 is minimum)
 		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("b_depth"), ffmpeg.ToCStr("1"), 0)
+
+	case HWAccelVAAPI:
+		// VA-API options optimized for fast visualisation encoding
+		// Quality level (1-51, lower=better) - CQP rate control
+		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("qp"), ffmpeg.ToCStr("24"), 0)
+		// Main profile for broad compatibility
+		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("profile"), ffmpeg.ToCStr("main"), 0)
+		// Low latency: disable B-frames for faster encoding
+		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("bf"), ffmpeg.ToCStr("0"), 0)
 
 	case HWAccelVideoToolbox:
 		// Apple VideoToolbox options
@@ -569,8 +587,8 @@ func (e *Encoder) WriteFrameRGBA(rgbaData []byte) error {
 		return e.writeFrameRGBADirect(rgbaData)
 	}
 
-	// For Vulkan/QSV, convert RGBA→NV12 then upload to GPU
-	if e.hwEncoder != nil && (e.hwEncoder.Type == HWAccelVulkan || e.hwEncoder.Type == HWAccelQSV) {
+	// For Vulkan/QSV/VAAPI, convert RGBA→NV12 then upload to GPU
+	if e.hwEncoder != nil && (e.hwEncoder.Type == HWAccelVulkan || e.hwEncoder.Type == HWAccelQSV || e.hwEncoder.Type == HWAccelVAAPI) {
 		return e.writeFrameHWUpload(rgbaData)
 	}
 

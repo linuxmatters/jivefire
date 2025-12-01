@@ -1,6 +1,7 @@
 package encoder
 
 import (
+	"os"
 	"runtime"
 	"strings"
 
@@ -15,6 +16,7 @@ const (
 	HWAccelAuto         HWAccelType = "auto"         // Auto-detect best available
 	HWAccelNVENC        HWAccelType = "nvenc"        // NVIDIA NVENC
 	HWAccelQSV          HWAccelType = "qsv"          // Intel Quick Sync Video
+	HWAccelVAAPI        HWAccelType = "vaapi"        // VA-API (AMD, Intel, older hardware)
 	HWAccelVulkan       HWAccelType = "vulkan"       // Vulkan Video
 	HWAccelVideoToolbox HWAccelType = "videotoolbox" // Apple VideoToolbox (macOS)
 )
@@ -29,7 +31,8 @@ type HWEncoder struct {
 }
 
 // linuxEncoderPriority defines the encoder preference order for Linux
-// Priority: nvenc > qsv > vulkan > software
+// Priority: nvenc > qsv > vaapi > vulkan > software
+// VAAPI is preferred over Vulkan as it has broader hardware support (AMD, Intel, older Intel)
 var linuxEncoderPriority = []struct {
 	name       string
 	accelType  HWAccelType
@@ -38,6 +41,7 @@ var linuxEncoderPriority = []struct {
 }{
 	{"h264_nvenc", HWAccelNVENC, ffmpeg.AVHWDeviceTypeCuda, "NVIDIA NVENC"},
 	{"h264_qsv", HWAccelQSV, ffmpeg.AVHWDeviceTypeQsv, "Intel Quick Sync Video"},
+	{"h264_vaapi", HWAccelVAAPI, ffmpeg.AVHWDeviceTypeVaapi, "VA-API"},
 	{"h264_vulkan", HWAccelVulkan, ffmpeg.AVHWDeviceTypeVulkan, "Vulkan Video"},
 }
 
@@ -61,6 +65,17 @@ func testHardwareAvailable(deviceType ffmpeg.AVHWDeviceType) bool {
 	ffmpeg.AVLogSetLevel(ffmpeg.AVLogQuiet)
 	defer ffmpeg.AVLogSetLevel(oldLevel)
 
+	// Suppress libva messages (VA-API has its own logging separate from FFmpeg)
+	oldLibvaLevel := os.Getenv("LIBVA_MESSAGING_LEVEL")
+	os.Setenv("LIBVA_MESSAGING_LEVEL", "0")
+	defer func() {
+		if oldLibvaLevel == "" {
+			os.Unsetenv("LIBVA_MESSAGING_LEVEL")
+		} else {
+			os.Setenv("LIBVA_MESSAGING_LEVEL", oldLibvaLevel)
+		}
+	}()
+
 	var hwDeviceCtx *ffmpeg.AVBufferRef
 	ret, _ := ffmpeg.AVHWDeviceCtxCreate(&hwDeviceCtx, deviceType, nil, nil, 0)
 	if ret == 0 && hwDeviceCtx != nil {
@@ -80,6 +95,17 @@ func testEncoderAvailable(encoderName string, deviceType ffmpeg.AVHWDeviceType, 
 	oldLevel, _ := ffmpeg.AVLogGetLevel()
 	ffmpeg.AVLogSetLevel(ffmpeg.AVLogQuiet)
 	defer ffmpeg.AVLogSetLevel(oldLevel)
+
+	// Suppress libva messages (VA-API has its own logging separate from FFmpeg)
+	oldLibvaLevel := os.Getenv("LIBVA_MESSAGING_LEVEL")
+	os.Setenv("LIBVA_MESSAGING_LEVEL", "0")
+	defer func() {
+		if oldLibvaLevel == "" {
+			os.Unsetenv("LIBVA_MESSAGING_LEVEL")
+		} else {
+			os.Setenv("LIBVA_MESSAGING_LEVEL", oldLibvaLevel)
+		}
+	}()
 
 	// Find the encoder
 	encName := ffmpeg.ToCStr(encoderName)
@@ -149,6 +175,34 @@ func testEncoderAvailable(encoderName string, deviceType ffmpeg.AVHWDeviceType, 
 		codecCtx.SetPixFmt(ffmpeg.AVPixFmtQsv)
 		// QSV setup is more complex, just test device availability for now
 		return testHardwareAvailable(deviceType)
+	case HWAccelVAAPI:
+		// VA-API requires hardware frames context
+		codecCtx.SetPixFmt(ffmpeg.AVPixFmtVaapi)
+
+		// Create hardware frames context
+		hwFramesRef := ffmpeg.AVHWFrameCtxAlloc(hwDeviceCtx)
+		if hwFramesRef == nil {
+			return false
+		}
+		defer ffmpeg.AVBufferUnref(&hwFramesRef)
+
+		// Cast the data pointer to AVHWFramesContext for configuration
+		framesCtx := ffmpeg.ToAVHWFramesContext(hwFramesRef.Data())
+		if framesCtx == nil {
+			return false
+		}
+
+		framesCtx.SetFormat(ffmpeg.AVPixFmtVaapi)
+		framesCtx.SetSwFormat(ffmpeg.AVPixFmtNv12)
+		framesCtx.SetWidth(1280)
+		framesCtx.SetHeight(720)
+
+		ret, _ = ffmpeg.AVHWFrameCtxInit(hwFramesRef)
+		if ret < 0 {
+			return false
+		}
+
+		codecCtx.SetHwFramesCtx(ffmpeg.AVBufferRef_(hwFramesRef))
 	case HWAccelVideoToolbox:
 		// VideoToolbox can work with device context
 		codecCtx.SetPixFmt(ffmpeg.AVPixFmtVideotoolbox)
@@ -239,25 +293,17 @@ func SelectBestEncoder(requestedType HWAccelType) *HWEncoder {
 		return nil // Explicitly requested software encoding
 	}
 
-	// For now we want entirely automatic behaviour on Linux: prefer NVENC, otherwise fall back to software
-	if requestedType == HWAccelAuto && runtime.GOOS == "linux" {
-		if nv := DetectNVENC(); nv != nil && nv.Available {
-			return nv
-		}
-		return nil
-	}
-
-	// Fallback to general detection for other OSes or explicit requests
+	// Detect all available encoders in priority order
 	encoders := DetectHWEncoders()
 
 	if requestedType == HWAccelAuto {
-		// Return first available encoder from the general priority list
+		// Return first available encoder from the priority list
 		for i := range encoders {
 			if encoders[i].Available {
 				return &encoders[i]
 			}
 		}
-		return nil // No hardware available
+		return nil // No hardware available, fall back to software
 	}
 
 	// Look for specifically requested encoder type

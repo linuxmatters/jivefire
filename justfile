@@ -181,6 +181,10 @@ bench-encoders: build
         ENCODERS+=("--command-name" "NVENC (h264_nvenc)" "./jivefire --no-preview --encoder=nvenc '$INPUT' testdata/bench-nvenc.mp4")
     fi
 
+    if echo "$PROBE_OUTPUT" | grep -q "h264_vaapi.*✓ available"; then
+        ENCODERS+=("--command-name" "VA-API (h264_vaapi)" "./jivefire --no-preview --encoder=vaapi '$INPUT' testdata/bench-vaapi.mp4")
+    fi
+
     if echo "$PROBE_OUTPUT" | grep -q "h264_vulkan.*✓ available"; then
         ENCODERS+=("--command-name" "Vulkan (h264_vulkan)" "./jivefire --no-preview --encoder=vulkan '$INPUT' testdata/bench-vulkan.mp4")
     fi
