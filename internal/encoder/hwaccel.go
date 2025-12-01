@@ -245,29 +245,6 @@ func DetectHWEncoders() []HWEncoder {
 	return encoders
 }
 
-// DetectNVENC probes specifically for NVENC availability and returns the encoder if present
-func DetectNVENC() *HWEncoder {
-	// Look up encoder by name
-	name := "h264_nvenc"
-	cstr := ffmpeg.ToCStr(name)
-	defer cstr.Free()
-
-	codec := ffmpeg.AVCodecFindEncoderByName(cstr)
-	if codec == nil {
-		return nil
-	}
-
-	// Check hardware availability for CUDA device type
-	available := testHardwareAvailable(ffmpeg.AVHWDeviceTypeCuda)
-	return &HWEncoder{
-		Name:        name,
-		Type:        HWAccelNVENC,
-		DeviceType:  ffmpeg.AVHWDeviceTypeCuda,
-		Available:   available,
-		Description: "NVIDIA NVENC",
-	}
-}
-
 // SelectBestEncoder returns the best available encoder based on priority
 // If requestedType is HWAccelAuto, it selects the first available hardware encoder
 // If requestedType is HWAccelNone, it returns nil (use software)
