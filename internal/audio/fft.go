@@ -93,15 +93,28 @@ func RearrangeFrequenciesCenterOut(barHeights []float64, result []float64) {
 
 // Processor handles FFT analysis for visualization
 type Processor struct {
-	// gofft doesn't need state - it works in-place
+	// Pre-computed Hanning window coefficients (avoids trig per sample)
+	hanningWindow []float64
+	// Reusable buffer for windowed output (avoids allocation per ProcessChunk)
+	windowedBuffer []float64
 }
 
-// NewProcessor creates a new audio processor
+// NewProcessor creates a new audio processor with pre-computed Hanning window
 func NewProcessor() *Processor {
-	return &Processor{}
+	// Pre-compute Hanning window coefficients once
+	window := make([]float64, config.FFTSize)
+	n := float64(config.FFTSize - 1)
+	for i := 0; i < config.FFTSize; i++ {
+		window[i] = 0.5 * (1 - math.Cos(2*math.Pi*float64(i)/n))
+	}
+	return &Processor{
+		hanningWindow:  window,
+		windowedBuffer: make([]float64, config.FFTSize),
+	}
 }
 
-// ProcessChunk performs FFT on a chunk of audio samples
+// ProcessChunk performs FFT on a chunk of audio samples.
+// Uses pre-computed Hanning window coefficients for better performance.
 func (p *Processor) ProcessChunk(samples []float64) []complex128 {
 	// Pad if needed
 	chunk := samples
@@ -111,12 +124,14 @@ func (p *Processor) ProcessChunk(samples []float64) []complex128 {
 		chunk = padded
 	}
 
-	// Apply Hanning window
-	windowed := ApplyHanning(chunk)
+	// Apply Hanning window using pre-computed coefficients (faster than trig per sample)
+	for i := 0; i < config.FFTSize; i++ {
+		p.windowedBuffer[i] = chunk[i] * p.hanningWindow[i]
+	}
 
 	// Convert to complex128 for gofft
 	// gofft works in-place, modifying the input array
-	fftInput := gofft.Float64ToComplex128Array(windowed)
+	fftInput := gofft.Float64ToComplex128Array(p.windowedBuffer)
 
 	// Compute FFT in-place
 	err := gofft.FFT(fftInput)

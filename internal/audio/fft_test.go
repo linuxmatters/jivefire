@@ -573,3 +573,66 @@ func TestApplyHanning_KnownValues(t *testing.T) {
 		})
 	}
 }
+
+// BenchmarkProcessChunk measures FFT processing performance with pre-computed Hanning window.
+// This is the hot path called for every FFT frame during both analysis and render passes.
+func BenchmarkProcessChunk(b *testing.B) {
+	// Create processor with pre-computed Hanning window
+	processor := NewProcessor()
+
+	// Generate test audio (random-ish data simulating real audio)
+	samples := make([]float64, 2048)
+	for i := range samples {
+		samples[i] = math.Sin(float64(i)*0.1) * 0.5
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		_ = processor.ProcessChunk(samples)
+	}
+}
+
+// BenchmarkApplyHanning measures the standalone Hanning window function (with trig per sample).
+// This is the old approach - kept for comparison with pre-computed version.
+func BenchmarkApplyHanning(b *testing.B) {
+	samples := make([]float64, 2048)
+	for i := range samples {
+		samples[i] = math.Sin(float64(i)*0.1) * 0.5
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		_ = ApplyHanning(samples)
+	}
+}
+
+// BenchmarkHanningPrecomputed measures applying pre-computed Hanning coefficients.
+// This isolates just the window application (multiply) without FFT overhead.
+func BenchmarkHanningPrecomputed(b *testing.B) {
+	// Pre-compute Hanning window (same as NewProcessor)
+	window := make([]float64, 2048)
+	n := float64(2048 - 1)
+	for i := 0; i < 2048; i++ {
+		window[i] = 0.5 * (1 - math.Cos(2*math.Pi*float64(i)/n))
+	}
+	output := make([]float64, 2048)
+
+	samples := make([]float64, 2048)
+	for i := range samples {
+		samples[i] = math.Sin(float64(i)*0.1) * 0.5
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		// Just multiply - no trig, no allocation
+		for j := 0; j < 2048; j++ {
+			output[j] = samples[j] * window[j]
+		}
+	}
+}
