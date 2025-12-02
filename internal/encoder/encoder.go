@@ -3,6 +3,7 @@ package encoder
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"unsafe"
 
 	ffmpeg "github.com/linuxmatters/ffmpeg-statigo"
@@ -32,16 +33,26 @@ type Config struct {
 	HWAccel       HWAccelType // Hardware acceleration type (default: auto-detect)
 }
 
-// AudioFIFO provides a simple FIFO buffer for audio samples
+// AudioFIFO provides a simple FIFO buffer for audio samples with pooled slice allocation.
 type AudioFIFO struct {
-	buffer []float32
-	size   int
+	buffer    []float32
+	size      int
+	frameSize int        // Samples per frame (e.g., 1024 for mono AAC, 2048 for stereo)
+	pool      *sync.Pool // Pooled slices for this frame size
 }
 
-// NewAudioFIFO creates a new audio FIFO buffer
-func NewAudioFIFO() *AudioFIFO {
+// NewAudioFIFO creates a new audio FIFO buffer with pooled allocation for the given frame size.
+// frameSize should be encoderFrameSize * channels (e.g., 1024 for mono AAC, 2048 for stereo).
+func NewAudioFIFO(frameSize int) *AudioFIFO {
 	return &AudioFIFO{
-		buffer: make([]float32, 0, 4096), // Start with reasonable capacity
+		buffer:    make([]float32, 0, 4096), // Start with reasonable capacity
+		frameSize: frameSize,
+		pool: &sync.Pool{
+			New: func() interface{} {
+				s := make([]float32, frameSize)
+				return &s
+			},
+		},
 	}
 }
 
@@ -51,14 +62,25 @@ func (f *AudioFIFO) Push(samples []float32) {
 	f.size = len(f.buffer)
 }
 
-// Pop removes and returns the requested number of samples
-// Returns nil if not enough samples available
+// Pop removes and returns the requested number of samples.
+// Returns nil if not enough samples available.
+// For the configured frame size, returns a pooled slice.
+// Caller MUST call ReturnSlice() when done to return it to the pool.
 func (f *AudioFIFO) Pop(count int) []float32 {
 	if f.size < count {
 		return nil
 	}
 
-	result := make([]float32, count)
+	var result []float32
+
+	// Use pooled slice for configured frame size
+	if count == f.frameSize {
+		result = *f.pool.Get().(*[]float32)
+	} else {
+		// Fallback to allocation for non-standard sizes (e.g., partial frames at flush)
+		result = make([]float32, count)
+	}
+
 	copy(result, f.buffer[:count])
 
 	// Shift remaining samples
@@ -67,6 +89,16 @@ func (f *AudioFIFO) Pop(count int) []float32 {
 	f.size -= count
 
 	return result
+}
+
+// ReturnSlice returns a slice to the pool after use.
+// Call this after processing each slice returned by Pop().
+// Safe to call with nil or non-pooled slices (will be no-op).
+func (f *AudioFIFO) ReturnSlice(s []float32) {
+	if s == nil || cap(s) != f.frameSize {
+		return
+	}
+	f.pool.Put(&s)
 }
 
 // Available returns the number of samples in the buffer
@@ -562,8 +594,10 @@ func (e *Encoder) initializeAudioEncoder() error {
 		return fmt.Errorf("failed to allocate audio encoder frame")
 	}
 
-	// Initialize audio FIFO for frame size adjustment
-	e.audioFIFO = NewAudioFIFO()
+	// Initialize audio FIFO with pooled allocation for the configured frame size
+	// Frame size = encoder frame size (1024 for AAC) × number of channels
+	samplesPerFrame := e.audioCodec.FrameSize() * outputChannels
+	e.audioFIFO = NewAudioFIFO(samplesPerFrame)
 
 	// Configure encoder frame with correct size
 	e.audioEncFrame.SetNbSamples(e.audioCodec.FrameSize())
@@ -842,7 +876,7 @@ func (e *Encoder) WriteAudioSamples(samples []float32) error {
 	// Process all complete frames in FIFO
 	samplesPerFrame := encoderFrameSize * outputChannels
 	for e.audioFIFO.Available() >= samplesPerFrame {
-		// Pop exactly one encoder frame worth of samples
+		// Pop exactly one encoder frame worth of samples (pooled for AAC sizes)
 		frameSamples := e.audioFIFO.Pop(samplesPerFrame)
 
 		// Make frame writable and write samples
@@ -854,6 +888,9 @@ func (e *Encoder) WriteAudioSamples(samples []float32) error {
 		} else {
 			writeErr = writeMonoFloats(e.audioEncFrame, frameSamples)
 		}
+
+		// Return slice to pool after use (safe for non-pooled slices)
+		e.audioFIFO.ReturnSlice(frameSamples)
 
 		if writeErr != nil {
 			return fmt.Errorf("failed to write %s samples: %w",
@@ -920,6 +957,8 @@ func (e *Encoder) FlushAudioEncoder() error {
 		frameSamples := make([]float32, samplesPerFrame)
 		partialSamples := e.audioFIFO.Pop(remaining)
 		copy(frameSamples, partialSamples)
+		// Return partial slice to pool (safe even for non-pooled sizes)
+		e.audioFIFO.ReturnSlice(partialSamples)
 
 		ffmpeg.AVFrameMakeWritable(e.audioEncFrame)
 

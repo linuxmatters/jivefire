@@ -122,7 +122,7 @@ func TestEncoderRGBA(t *testing.T) {
 // requesting more samples than available, catching potential slice bounds
 // panics or incorrect partial returns.
 func TestAudioFIFO_PopMoreThanAvailable(t *testing.T) {
-	fifo := NewAudioFIFO()
+	fifo := NewAudioFIFO(1024)
 
 	// Push some samples
 	samples := []float32{1.0, 2.0, 3.0}
@@ -166,7 +166,7 @@ func TestAudioFIFO_PopMoreThanAvailable(t *testing.T) {
 // TestAudioFIFO_EmptyBuffer verifies that operations on an empty FIFO
 // don't panic and return appropriate values.
 func TestAudioFIFO_EmptyBuffer(t *testing.T) {
-	fifo := NewAudioFIFO()
+	fifo := NewAudioFIFO(1024)
 
 	// Test Available on empty buffer
 	if fifo.Available() != 0 {
@@ -199,7 +199,7 @@ func TestAudioFIFO_EmptyBuffer(t *testing.T) {
 
 // TestAudioFIFO_BoundaryConditions tests edge cases with exact amounts.
 func TestAudioFIFO_BoundaryConditions(t *testing.T) {
-	fifo := NewAudioFIFO()
+	fifo := NewAudioFIFO(1024)
 
 	// Push exact amount
 	samples := []float32{1.0, 2.0, 3.0, 4.0, 5.0}
@@ -230,7 +230,7 @@ func TestAudioFIFO_BoundaryConditions(t *testing.T) {
 
 // TestAudioFIFO_SequentialOperations tests multiple push/pop operations.
 func TestAudioFIFO_SequentialOperations(t *testing.T) {
-	fifo := NewAudioFIFO()
+	fifo := NewAudioFIFO(1024)
 
 	// Push and pop multiple times
 	for round := 0; round < 5; round++ {
@@ -276,7 +276,7 @@ func TestAudioFIFO_SequentialOperations(t *testing.T) {
 
 // TestAudioFIFO_LargeValues tests with large sample counts.
 func TestAudioFIFO_LargeValues(t *testing.T) {
-	fifo := NewAudioFIFO()
+	fifo := NewAudioFIFO(1024)
 
 	// Push a large number of samples
 	largeCount := 100000
@@ -311,4 +311,76 @@ func TestAudioFIFO_LargeValues(t *testing.T) {
 	}
 
 	t.Logf("LargeValues test passed: %d samples", largeCount)
+}
+
+// BenchmarkAudioFIFO_Pop measures allocation overhead for Pop() operations
+// without returning slices to pool (simulates old behaviour).
+func BenchmarkAudioFIFO_Pop(b *testing.B) {
+	const samplesPerFrame = 1024 // AAC frame size
+
+	// Pre-generate samples to avoid allocation during benchmark
+	samples := make([]float32, samplesPerFrame)
+	for i := range samples {
+		samples[i] = float32(i) * 0.001
+	}
+
+	fifo := NewAudioFIFO(samplesPerFrame)
+
+	// Sink slice to force escape analysis (prevents inlining optimisation)
+	var results [][]float32
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		fifo.Push(samples)
+		result := fifo.Pop(samplesPerFrame)
+		if result == nil {
+			b.Fatal("unexpected nil from Pop")
+		}
+		// Append to slice to prevent compiler from stack-allocating
+		results = append(results, result)
+	}
+
+	// Prevent results from being optimised away
+	if len(results) == 0 && b.N > 0 {
+		b.Log("results used")
+	}
+}
+
+// BenchmarkAudioFIFO_PopWithPool measures Pop() with proper slice pooling.
+// This simulates real encoder behaviour where slices are returned to pool.
+func BenchmarkAudioFIFO_PopWithPool(b *testing.B) {
+	const samplesPerFrame = 1024 // AAC frame size
+
+	// Pre-generate samples to avoid allocation during benchmark
+	samples := make([]float32, samplesPerFrame)
+	for i := range samples {
+		samples[i] = float32(i) * 0.001
+	}
+
+	fifo := NewAudioFIFO(samplesPerFrame)
+
+	// Sink to prevent compiler optimisation
+	var sink float32
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		fifo.Push(samples)
+		result := fifo.Pop(samplesPerFrame)
+		if result == nil {
+			b.Fatal("unexpected nil from Pop")
+		}
+		// Use the result (simulates writeMonoFloats/writeStereoFloats)
+		sink += result[0]
+		// Return to pool as encoder does
+		fifo.ReturnSlice(result)
+	}
+
+	// Prevent sink from being optimised away
+	if sink == 0 && b.N > 0 {
+		b.Log("sink used")
+	}
 }
