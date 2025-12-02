@@ -156,6 +156,72 @@ func convertRGBToYUV(rgbData []byte, yuvFrame *ffmpeg.AVFrame, width, height int
 	return nil
 }
 
+// convertRGBAToYUV converts RGBA data directly to YUV420P (planar) format.
+// Skips the intermediate RGB24 buffer allocation for significantly faster software encoding.
+func convertRGBAToYUV(rgbaData []byte, yuvFrame *ffmpeg.AVFrame, width, height int) error {
+	yPlane := yuvFrame.Data().Get(0)
+	uPlane := yuvFrame.Data().Get(1)
+	vPlane := yuvFrame.Data().Get(2)
+
+	yLinesize := int(yuvFrame.Linesize().Get(0))
+	uLinesize := int(yuvFrame.Linesize().Get(1))
+	vLinesize := int(yuvFrame.Linesize().Get(2))
+
+	parallelRows(height, func(startY, endY int) {
+		// Align startY to even for correct UV row calculation
+		evenStart := startY
+		if evenStart&1 != 0 {
+			evenStart++
+		}
+
+		// Process even rows: Y + UV
+		for y := evenStart; y < endY; y += 2 {
+			yPtr := unsafe.Add(unsafe.Pointer(yPlane), y*yLinesize)
+			uvY := y >> 1
+			uRowPtr := unsafe.Add(unsafe.Pointer(uPlane), uvY*uLinesize)
+			vRowPtr := unsafe.Add(unsafe.Pointer(vPlane), uvY*vLinesize)
+			rgbaIdx := y * width * 4
+
+			for x := 0; x < width; x++ {
+				r := int32(rgbaData[rgbaIdx])
+				g := int32(rgbaData[rgbaIdx+1])
+				b := int32(rgbaData[rgbaIdx+2])
+				rgbaIdx += 4 // Skip alpha
+
+				*(*uint8)(unsafe.Add(yPtr, x)) = rgbToY(r, g, b)
+
+				// UV subsampling: every other pixel on even rows
+				if (x & 1) == 0 {
+					uvX := x >> 1
+					*(*uint8)(unsafe.Add(uRowPtr, uvX)) = rgbToCb(r, g, b)
+					*(*uint8)(unsafe.Add(vRowPtr, uvX)) = rgbToCr(r, g, b)
+				}
+			}
+		}
+
+		// Process odd rows: Y only (no UV)
+		oddStart := startY
+		if oddStart&1 == 0 {
+			oddStart++
+		}
+		for y := oddStart; y < endY; y += 2 {
+			yPtr := unsafe.Add(unsafe.Pointer(yPlane), y*yLinesize)
+			rgbaIdx := y * width * 4
+
+			for x := 0; x < width; x++ {
+				r := int32(rgbaData[rgbaIdx])
+				g := int32(rgbaData[rgbaIdx+1])
+				b := int32(rgbaData[rgbaIdx+2])
+				rgbaIdx += 4 // Skip alpha
+
+				*(*uint8)(unsafe.Add(yPtr, x)) = rgbToY(r, g, b)
+			}
+		}
+	})
+
+	return nil
+}
+
 // convertRGBAToNV12 converts RGBA data to NV12 (semi-planar) format.
 // NV12 has a Y plane followed by interleaved UV plane.
 func convertRGBAToNV12(rgbaData []byte, nv12Frame *ffmpeg.AVFrame, width, height int) error {

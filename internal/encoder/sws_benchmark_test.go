@@ -260,9 +260,187 @@ func BenchmarkSwscaleRGBToYUV(b *testing.B) {
 	}
 }
 
+// BenchmarkRGBAToYUVDirect measures the direct RGBA→YUV420P conversion.
+// This skips the intermediate RGB24 buffer for software encoding path.
+func BenchmarkRGBAToYUVDirect(b *testing.B) {
+	// Create RGBA test data
+	rgbaSize := benchWidth * benchHeight * 4
+	rgbaData := make([]byte, rgbaSize)
+	for i := 0; i < rgbaSize; i += 4 {
+		rgbaData[i] = uint8(i % 256)   // R
+		rgbaData[i+1] = uint8(i % 128) // G
+		rgbaData[i+2] = uint8(i % 64)  // B
+		rgbaData[i+3] = 255            // A
+	}
+
+	// Allocate YUV frame
+	yuvFrame := ffmpeg.AVFrameAlloc()
+	yuvFrame.SetWidth(benchWidth)
+	yuvFrame.SetHeight(benchHeight)
+	yuvFrame.SetFormat(int(ffmpeg.AVPixFmtYuv420P))
+	ffmpeg.AVFrameGetBuffer(yuvFrame, 0)
+	defer ffmpeg.AVFrameFree(&yuvFrame)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		convertRGBAToYUV(rgbaData, yuvFrame, benchWidth, benchHeight)
+	}
+}
+
+// BenchmarkRGBAToYUVViaRGB24 measures RGBA→RGB24→YUV420P (old path).
+// This was the original software encoding path before direct RGBA→YUV.
+func BenchmarkRGBAToYUVViaRGB24(b *testing.B) {
+	// Create RGBA test data
+	rgbaSize := benchWidth * benchHeight * 4
+	rgbaData := make([]byte, rgbaSize)
+	for i := 0; i < rgbaSize; i += 4 {
+		rgbaData[i] = uint8(i % 256)   // R
+		rgbaData[i+1] = uint8(i % 128) // G
+		rgbaData[i+2] = uint8(i % 64)  // B
+		rgbaData[i+3] = 255            // A
+	}
+
+	// Allocate RGB24 buffer and YUV frame
+	rgb24Size := benchWidth * benchHeight * 3
+	rgb24Data := make([]byte, rgb24Size)
+
+	yuvFrame := ffmpeg.AVFrameAlloc()
+	yuvFrame.SetWidth(benchWidth)
+	yuvFrame.SetHeight(benchHeight)
+	yuvFrame.SetFormat(int(ffmpeg.AVPixFmtYuv420P))
+	ffmpeg.AVFrameGetBuffer(yuvFrame, 0)
+	defer ffmpeg.AVFrameFree(&yuvFrame)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// Step 1: RGBA → RGB24 (strip alpha)
+		srcIdx := 0
+		dstIdx := 0
+		for dstIdx < rgb24Size {
+			rgb24Data[dstIdx] = rgbaData[srcIdx]     // R
+			rgb24Data[dstIdx+1] = rgbaData[srcIdx+1] // G
+			rgb24Data[dstIdx+2] = rgbaData[srcIdx+2] // B
+			srcIdx += 4
+			dstIdx += 3
+		}
+		// Step 2: RGB24 → YUV420P
+		convertRGBToYUV(rgb24Data, yuvFrame, benchWidth, benchHeight)
+	}
+}
+
 // =============================================================================
-// Equivalence Test
+// Equivalence Tests
 // =============================================================================
+
+// TestRGBAConversionEquivalence verifies RGBA→YUV direct and via-RGB24 produce identical output.
+func TestRGBAConversionEquivalence(t *testing.T) {
+	// Create RGBA test data with varied pattern
+	rgbaSize := benchWidth * benchHeight * 4
+	rgbaData := make([]byte, rgbaSize)
+	for i := 0; i < rgbaSize; i += 4 {
+		rgbaData[i] = uint8((i * 7) % 256)   // R
+		rgbaData[i+1] = uint8((i * 3) % 256) // G
+		rgbaData[i+2] = uint8((i * 5) % 256) // B
+		rgbaData[i+3] = 255                  // A (ignored)
+	}
+
+	// Allocate YUV frames for both paths
+	yuvDirect := ffmpeg.AVFrameAlloc()
+	yuvDirect.SetWidth(benchWidth)
+	yuvDirect.SetHeight(benchHeight)
+	yuvDirect.SetFormat(int(ffmpeg.AVPixFmtYuv420P))
+	ffmpeg.AVFrameGetBuffer(yuvDirect, 0)
+	defer ffmpeg.AVFrameFree(&yuvDirect)
+
+	yuvViaRGB := ffmpeg.AVFrameAlloc()
+	yuvViaRGB.SetWidth(benchWidth)
+	yuvViaRGB.SetHeight(benchHeight)
+	yuvViaRGB.SetFormat(int(ffmpeg.AVPixFmtYuv420P))
+	ffmpeg.AVFrameGetBuffer(yuvViaRGB, 0)
+	defer ffmpeg.AVFrameFree(&yuvViaRGB)
+
+	// Convert using direct path
+	err := convertRGBAToYUV(rgbaData, yuvDirect, benchWidth, benchHeight)
+	if err != nil {
+		t.Fatalf("Direct RGBA→YUV conversion failed: %v", err)
+	}
+
+	// Convert using via-RGB24 path
+	rgb24Size := benchWidth * benchHeight * 3
+	rgb24Data := make([]byte, rgb24Size)
+	srcIdx := 0
+	dstIdx := 0
+	for dstIdx < rgb24Size {
+		rgb24Data[dstIdx] = rgbaData[srcIdx]     // R
+		rgb24Data[dstIdx+1] = rgbaData[srcIdx+1] // G
+		rgb24Data[dstIdx+2] = rgbaData[srcIdx+2] // B
+		srcIdx += 4
+		dstIdx += 3
+	}
+	err = convertRGBToYUV(rgb24Data, yuvViaRGB, benchWidth, benchHeight)
+	if err != nil {
+		t.Fatalf("Via-RGB24 conversion failed: %v", err)
+	}
+
+	// Compare Y planes (should be identical)
+	yLinesize := yuvDirect.Linesize().Get(0)
+	yPlaneDirect := yuvDirect.Data().Get(0)
+	yPlaneViaRGB := yuvViaRGB.Data().Get(0)
+
+	yDiffCount := 0
+	for y := 0; y < benchHeight; y++ {
+		for x := 0; x < benchWidth; x++ {
+			offset := y*int(yLinesize) + x
+			directVal := *(*uint8)(unsafe.Add(unsafe.Pointer(yPlaneDirect), offset))
+			viaRGBVal := *(*uint8)(unsafe.Add(unsafe.Pointer(yPlaneViaRGB), offset))
+			if directVal != viaRGBVal {
+				yDiffCount++
+			}
+		}
+	}
+
+	// Compare U planes
+	uLinesize := yuvDirect.Linesize().Get(1)
+	uPlaneDirect := yuvDirect.Data().Get(1)
+	uPlaneViaRGB := yuvViaRGB.Data().Get(1)
+
+	uDiffCount := 0
+	for y := 0; y < benchHeight/2; y++ {
+		for x := 0; x < benchWidth/2; x++ {
+			offset := y*int(uLinesize) + x
+			directVal := *(*uint8)(unsafe.Add(unsafe.Pointer(uPlaneDirect), offset))
+			viaRGBVal := *(*uint8)(unsafe.Add(unsafe.Pointer(uPlaneViaRGB), offset))
+			if directVal != viaRGBVal {
+				uDiffCount++
+			}
+		}
+	}
+
+	// Compare V planes
+	vLinesize := yuvDirect.Linesize().Get(2)
+	vPlaneDirect := yuvDirect.Data().Get(2)
+	vPlaneViaRGB := yuvViaRGB.Data().Get(2)
+
+	vDiffCount := 0
+	for y := 0; y < benchHeight/2; y++ {
+		for x := 0; x < benchWidth/2; x++ {
+			offset := y*int(vLinesize) + x
+			directVal := *(*uint8)(unsafe.Add(unsafe.Pointer(vPlaneDirect), offset))
+			viaRGBVal := *(*uint8)(unsafe.Add(unsafe.Pointer(vPlaneViaRGB), offset))
+			if directVal != viaRGBVal {
+				vDiffCount++
+			}
+		}
+	}
+
+	// Both paths should produce identical output
+	if yDiffCount > 0 || uDiffCount > 0 || vDiffCount > 0 {
+		t.Errorf("RGBA conversion paths differ: Y=%d, U=%d, V=%d pixel differences",
+			yDiffCount, uDiffCount, vDiffCount)
+	} else {
+		t.Log("RGBA→YUV direct and via-RGB24 paths produce identical output ✓")
+	}
+}
 
 // TestConversionEquivalence verifies both implementations produce similar output.
 // Some pixel differences are expected due to different rounding in coefficient
