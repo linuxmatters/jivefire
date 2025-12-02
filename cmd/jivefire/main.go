@@ -360,6 +360,7 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 	// Pre-allocate reusable buffers to avoid allocations in render loop
 	barHeights := make([]float64, config.NumBars)
 	rearrangedHeights := make([]float64, config.NumBars)
+	barHeightsCopy := make([]float64, config.NumBars) // For UI updates
 
 	// Calculate gravity modifier (CAVA formula)
 	// Scales bar fall speed based on framerate deviation from CAVA's reference 60fps
@@ -374,6 +375,10 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 	// Sliding buffer for FFT: we read samplesPerFrame but need FFTSize for FFT
 	samplesPerFrame := config.SampleRate / config.FPS
 	fftBuffer := make([]float64, config.FFTSize)
+
+	// Pre-allocate reusable buffers for audio processing (avoid per-frame allocations)
+	newSamples := make([]float64, 0, samplesPerFrame)
+	audioSamples := make([]float32, samplesPerFrame)
 
 	// Pre-fill buffer with first chunk
 	// Keep reading until we get the requested number of samples or EOF
@@ -516,7 +521,7 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 			elapsed := time.Since(renderStartTime)
 
 			// Copy bar heights for UI (use rearranged for better visual)
-			barHeightsCopy := make([]float64, len(rearrangedHeights))
+			// Uses pre-allocated barHeightsCopy buffer
 			copy(barHeightsCopy, rearrangedHeights)
 
 			// Get actual file size from disk (not an estimate)
@@ -550,7 +555,7 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 		// === AUDIO TIMING START ===
 		// Read audio, encode, and manage buffer for next frame
 		t0 = time.Now()
-		newSamples := make([]float64, 0, samplesPerFrame)
+		newSamples = newSamples[:0] // Reset slice, reuse backing array
 		for len(newSamples) < samplesPerFrame {
 			chunk, err := reader.ReadChunk(samplesPerFrame - len(newSamples))
 			if err != nil {
@@ -579,11 +584,11 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 
 		// Write audio samples for this frame to encoder
 		// Convert float64 samples to float32 for AAC encoder
-		audioSamples := make([]float32, len(newSamples))
+		// Uses pre-allocated audioSamples buffer, slice to actual length
 		for i, s := range newSamples {
 			audioSamples[i] = float32(s)
 		}
-		if err := enc.WriteAudioSamples(audioSamples); err != nil {
+		if err := enc.WriteAudioSamples(audioSamples[:len(newSamples)]); err != nil {
 			cli.PrintError(fmt.Sprintf("error writing audio at frame %d: %v", frameNum, err))
 			p.Quit()
 			return
