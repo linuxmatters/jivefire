@@ -232,8 +232,17 @@ func convertRGBAToNV12(rgbaData []byte, nv12Frame *ffmpeg.AVFrame, width, height
 	uvLinesize := int(nv12Frame.Linesize().Get(1))
 
 	parallelRows(height, func(startY, endY int) {
-		for y := startY; y < endY; y++ {
+		// Align startY to even for correct UV row calculation
+		evenStart := startY
+		if evenStart&1 != 0 {
+			evenStart++
+		}
+
+		// Process even rows: Y + UV
+		for y := evenStart; y < endY; y += 2 {
 			yPtr := unsafe.Add(unsafe.Pointer(yPlane), y*yLinesize)
+			uvY := y >> 1
+			uvRowPtr := unsafe.Add(unsafe.Pointer(uvPlane), uvY*uvLinesize)
 			rgbaIdx := y * width * 4
 
 			for x := 0; x < width; x++ {
@@ -244,14 +253,32 @@ func convertRGBAToNV12(rgbaData []byte, nv12Frame *ffmpeg.AVFrame, width, height
 
 				*(*uint8)(unsafe.Add(yPtr, x)) = rgbToY(r, g, b)
 
-				// UV subsampling: top-left pixel of each 2×2 block
-				if (y&1) == 0 && (x&1) == 0 {
-					uvY := y >> 1
+				// UV subsampling: every other pixel on even rows
+				if (x & 1) == 0 {
 					uvX := x >> 1
-					uvPtr := unsafe.Add(unsafe.Pointer(uvPlane), uvY*uvLinesize+uvX*2)
+					uvPtr := unsafe.Add(uvRowPtr, uvX*2)
 					*(*uint8)(uvPtr) = rgbToCb(r, g, b)
 					*(*uint8)(unsafe.Add(uvPtr, 1)) = rgbToCr(r, g, b)
 				}
+			}
+		}
+
+		// Process odd rows: Y only (no UV)
+		oddStart := startY
+		if oddStart&1 == 0 {
+			oddStart++
+		}
+		for y := oddStart; y < endY; y += 2 {
+			yPtr := unsafe.Add(unsafe.Pointer(yPlane), y*yLinesize)
+			rgbaIdx := y * width * 4
+
+			for x := 0; x < width; x++ {
+				r := int32(rgbaData[rgbaIdx])
+				g := int32(rgbaData[rgbaIdx+1])
+				b := int32(rgbaData[rgbaIdx+2])
+				rgbaIdx += 4 // Skip alpha
+
+				*(*uint8)(unsafe.Add(yPtr, x)) = rgbToY(r, g, b)
 			}
 		}
 	})
