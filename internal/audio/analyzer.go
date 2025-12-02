@@ -99,15 +99,12 @@ func AnalyzeAudio(filename string, progressCb ProgressCallback) (*AudioProfile, 
 	frameNum := 0
 
 	for {
-		// Use current buffer for FFT (copy to ensure we have full FFTSize)
-		chunk := make([]float64, config.FFTSize)
-		copy(chunk, fftBuffer)
-
-		// Compute FFT
-		coeffs := processor.ProcessChunk(chunk)
+		// Pass fftBuffer directly to ProcessChunk - it creates its own copy via ApplyHanning
+		// No need for intermediate allocation since analyzeFrame only reads the buffer
+		coeffs := processor.ProcessChunk(fftBuffer)
 
 		// Analyze frequency bins
-		analysis := analyzeFrame(coeffs, chunk)
+		analysis := analyzeFrame(coeffs, fftBuffer)
 		profile.Frames = append(profile.Frames, analysis)
 
 		// Track global statistics
