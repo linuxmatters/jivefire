@@ -63,16 +63,16 @@ Frame Renderer (image/draw + custom optimizations)
     ↓
 Colourspace Conversion (path depends on encoder)
     │
-    ├─ [Software] RGB → YUV420P (Pure Go, parallelised)
-    │   ├─ 12.8× faster than FFmpeg swscale
+    ├─ [Software] RGBA → YUV420P (Pure Go, parallelised)
+    │   ├─ Direct conversion skips intermediate RGB24 buffer
     │   ├─ Parallel row processing across CPU cores
     │   └─ Standard ITU-R BT.601 coefficients
     │
-    └─ [Hardware] RGBA → GPU (direct upload)
-        └─ Colourspace conversion on GPU
+    └─ [Hardware] RGBA → NV12 (Pure Go, parallelised)
+        └─ Semi-planar format for GPU encoder upload
     ↓
 H.264 Encoder (auto-selected)
-    ├─ NVENC (NVIDIA GPU) - 15× realtime, RGBA input
+    ├─ NVENC (NVIDIA GPU) - hardware accelerated, RGBA input
     ├─ Quick Sync (Intel iGPU) - hardware accelerated
     ├─ VideoToolbox (macOS) - Apple Silicon/Intel
     └─ libx264 (software fallback) - YUV420P input
@@ -101,18 +101,23 @@ Automatic GPU encoder detection in `encoder/hwaccel.go`:
 - **VideoToolbox** (macOS): Apple Silicon and Intel Mac hardware encoding
 - **Software fallback**: Optimised libx264 with `veryfast` preset when no GPU available
 
-**Why RGBA for NVENC?** Initial implementation used CPU-side RGB→YUV conversion for all encoders. Benchmarking showed NVENC was no faster than libx264 due to CPU conversion overhead. Sending RGBA directly to NVENC (which accepts it natively) lets the GPU handle colourspace conversion, achieving **15× realtime** encoding (vs 10× for software).
+**Why RGBA for hardware encoders?** Initial implementation used CPU-side RGB→YUV conversion for all encoders. Benchmarking showed hardware encoders were bottlenecked by CPU conversion overhead. Hardware encoders accept NV12 (semi-planar YUV) natively, so we convert RGBA→NV12 on CPU and let the GPU handle encoding only—avoiding the RGB→YUV→NV12 double conversion that would occur if we sent YUV420P.
 
-### RGB → YUV Conversion (Software Path)
-Custom parallelised RGB→YUV420P converter in `encoder/frame.go`:
-- Processes image rows in parallel across CPU cores
-- Uses Go's standard ITU-R BT.601 coefficients
-- **12.8× faster than FFmpeg's swscale** (benchmarked: 226µs vs 2,888µs per 1280×720 frame on AMD Ryzen 9 5950X)
+### Colourspace Conversion
+Custom parallelised converters in `encoder/frame.go`:
+- **RGBA→YUV420P** (software encoder): Direct conversion skips intermediate RGB24 buffer allocation
+- **RGBA→NV12** (hardware encoders): Semi-planar format for GPU upload
+- **RGB24→YUV420P** (legacy path): For pre-converted RGB data
+
+All converters share common characteristics:
+- Parallel row processing across CPU cores via goroutines
+- Even/odd row separation eliminates per-pixel conditionals in inner loops
+- ITU-R BT.601 coefficients with fixed-point integer arithmetic (no floating-point in hot path)
 - Strong candidate for extraction as standalone Go module
 
-**Why not FFmpeg's swscale?** While ffmpeg-statigo exposes the full swscale API, benchmarking revealed our parallelised Go implementation significantly outperforms it. FFmpeg's swscale is single-threaded; our implementation distributes row processing across all CPU cores. On a 12-core/24-thread Ryzen 9, parallelisation wins decisively over SIMD.
+**Why not FFmpeg's swscale?** While ffmpeg-statigo exposes the full swscale API, our parallelised Go implementation significantly outperforms it. FFmpeg's swscale is single-threaded; our implementation distributes row processing across all CPU cores. Parallelisation across cores beats single-threaded SIMD for this workload.
 
-**Why not Go's `color.RGBToYCbCr()`?** It's fast for single pixels but not parallelised. Our implementation processes multiple rows simultaneously across goroutines, achieving ~10× realtime encoding speed.
+**Why not Go's `color.RGBToYCbCr()`?** It's correct for single pixels but not parallelised. Our implementation processes multiple rows simultaneously across goroutines.
 
 ### Symmetric Bar Rendering
 Bars 0-31 are mirrored to create bars 32-63. Renderer draws upper-left quadrant (1/4 of pixels), then mirrors 3 times:
@@ -152,7 +157,10 @@ third_party/ffmpeg-statigo/  → Git submodule: FFmpeg 8.0 static bindings
 ## Future-Proofing
 
 ### go-yuv: Parallelised Colourspace Conversion
-The RGB→YUV converter in `encoder/frame.go` is a strong candidate for extraction as a standalone Go module. Benchmarking shows it's **12.8× faster than FFmpeg's swscale** for RGB24→YUV420P conversion at 720p, thanks to goroutine-based parallelisation across CPU cores.
+The colourspace converters in `encoder/frame.go` are strong candidates for extraction as a standalone Go module. The implementation offers:
+- Multiple format conversions: RGBA→YUV420P, RGBA→NV12, RGB24→YUV420P
+- Goroutine-based parallelisation across CPU cores
+- Pure Go with no CGO dependencies (coefficients only, no FFmpeg)
 
 There's currently no pure Go library offering parallelised colourspace conversion. Existing options are either single-threaded (stdlib `color.RGBToYCbCr`) or require CGO FFmpeg bindings. A standalone `go-yuv` module would benefit:
 - Video encoding pipelines avoiding FFmpeg dependencies
