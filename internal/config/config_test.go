@@ -9,11 +9,11 @@ import (
 // prefix handling, and byte ordering bugs.
 func TestParseHexColor_ValidInputs(t *testing.T) {
 	testCases := []struct {
-		name    string
-		input   string
-		wantR   uint8
-		wantG   uint8
-		wantB   uint8
+		name  string
+		input string
+		wantR uint8
+		wantG uint8
+		wantB uint8
 	}{
 		// Uppercase without hash
 		{

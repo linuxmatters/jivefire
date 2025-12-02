@@ -20,8 +20,8 @@ import (
 func TestBinFFT_KnownSineWave(t *testing.T) {
 	const (
 		sampleRate  = 44100
-		frequency   = 440    // A4 musical note
-		duration    = 1.0    // 1 second
+		frequency   = 440 // A4 musical note
+		duration    = 1.0 // 1 second
 		fftSize     = 2048
 		numBars     = 64
 		sensitivity = 1.0
@@ -154,8 +154,8 @@ func TestBinFFT_NoiseGate(t *testing.T) {
 	const (
 		fftSize     = 2048
 		numBars     = 64
-		sensitivity = 0.1   // Low sensitivity to amplify quiet signals
-		baseScale   = 0.1   // Low base scale
+		sensitivity = 0.1 // Low sensitivity to amplify quiet signals
+		baseScale   = 0.1 // Low base scale
 	)
 
 	// Create very quiet signal (amplitude 0.001)
@@ -418,7 +418,7 @@ func TestRearrangeFrequenciesCenterOut_SmallInput(t *testing.T) {
 
 	// Expected mapping for 4-bar input:
 	// Input bars:    [0, 1, 2, 3] with values [1, 2, 3, 4]
-	// Center index: 2
+	// Center index:  2
 	// Output should be symmetric:
 	//   - Bars 0-1 mirrored from center going left (1 and 2)
 	//   - Bars 2-3 mirrored from center going right (1 and 2)
@@ -440,4 +440,136 @@ func TestRearrangeFrequenciesCenterOut_SmallInput(t *testing.T) {
 	}
 
 	t.Logf("Small input test passed: %v → %v", input, result)
+}
+
+// TestApplyHanning_KnownValues verifies Hanning window coefficients match expected values.
+// This catches formula errors that would affect FFT accuracy.
+//
+// Hanning window formula: w[i] = 0.5 * (1 - cos(2π*i/(N-1)))
+// Properties tested:
+// - Window is symmetric: w[i] == w[N-1-i]
+// - Window has zero endpoints: w[0] == w[N-1] == 0
+// - Window peaks at center: w[N/2] == 1.0
+func TestApplyHanning_KnownValues(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    []float64
+		validate func(t *testing.T, windowed []float64)
+	}{
+		{
+			name:  "4-element window",
+			input: []float64{1, 1, 1, 1},
+			validate: func(t *testing.T, windowed []float64) {
+				// Hanning window for N=4:
+				// w[0] = 0.5 * (1 - cos(0)) = 0.5 * (1 - 1) = 0
+				// w[1] = 0.5 * (1 - cos(2π*1/3)) = 0.5 * (1 - (-0.5)) = 0.75
+				// w[2] = 0.5 * (1 - cos(2π*2/3)) = 0.5 * (1 - (-0.5)) = 0.75
+				// w[3] = 0.5 * (1 - cos(2π)) = 0.5 * (1 - 1) = 0
+
+				expected := []float64{0, 0.75, 0.75, 0}
+				const epsilon = 1e-10
+
+				for i, v := range windowed {
+					if math.Abs(v-expected[i]) > epsilon {
+						t.Errorf("w[%d]: got %.10f, want %.10f", i, v, expected[i])
+					}
+				}
+
+				// Verify symmetry
+				if math.Abs(windowed[0]-windowed[3]) > epsilon {
+					t.Errorf("Symmetry: windowed[0]=%.10f != windowed[3]=%.10f", windowed[0], windowed[3])
+				}
+				if math.Abs(windowed[1]-windowed[2]) > epsilon {
+					t.Errorf("Symmetry: windowed[1]=%.10f != windowed[2]=%.10f", windowed[1], windowed[2])
+				}
+			},
+		},
+		{
+			name:  "8-element window",
+			input: []float64{2, 2, 2, 2, 2, 2, 2, 2},
+			validate: func(t *testing.T, windowed []float64) {
+				// Verify zero endpoints
+				const epsilon = 1e-10
+				if math.Abs(windowed[0]) > epsilon {
+					t.Errorf("w[0] should be ~0, got %.10f", windowed[0])
+				}
+				if math.Abs(windowed[7]) > epsilon {
+					t.Errorf("w[7] should be ~0, got %.10f", windowed[7])
+				}
+
+				// Verify symmetry around center
+				for i := 0; i < 4; i++ {
+					if math.Abs(windowed[i]-windowed[7-i]) > epsilon {
+						t.Errorf("Symmetry violation at i=%d: windowed[%d]=%.10f != windowed[%d]=%.10f",
+							i, i, windowed[i], 7-i, windowed[7-i])
+					}
+				}
+
+				// Verify peak near center
+				peakValue := windowed[3] // or windowed[4]
+				if peakValue < 0.95 || peakValue > 1.05 {
+					t.Errorf("Peak value at center should be ~1.0, got %.10f", peakValue)
+				}
+			},
+		},
+		{
+			name:  "Hanning window properties on 2048-sample",
+			input: make([]float64, 2048),
+			validate: func(t *testing.T, windowed []float64) {
+				const epsilon = 1e-10
+				n := len(windowed)
+
+				// Test 1: Zero endpoints
+				if math.Abs(windowed[0]) > epsilon {
+					t.Errorf("w[0] should be ~0, got %.10f", windowed[0])
+				}
+				if math.Abs(windowed[n-1]) > epsilon {
+					t.Errorf("w[%d] should be ~0, got %.10f", n-1, windowed[n-1])
+				}
+
+				// Test 2: Perfect symmetry
+				for i := 0; i < n/2; i++ {
+					if math.Abs(windowed[i]-windowed[n-1-i]) > epsilon {
+						t.Errorf("Symmetry violation at i=%d: windowed[%d]=%.10f != windowed[%d]=%.10f",
+							i, i, windowed[i], n-1-i, windowed[n-1-i])
+					}
+				}
+
+				// Test 3: Peak at center (index 1023 or 1024 for N=2048)
+				centerLeft := windowed[1023]
+				centerRight := windowed[1024]
+				if centerLeft < 0.99 || centerLeft > 1.01 {
+					t.Errorf("Peak at center-left (1023): got %.10f, want ~1.0", centerLeft)
+				}
+				if centerRight < 0.99 || centerRight > 1.01 {
+					t.Errorf("Peak at center-right (1024): got %.10f, want ~1.0", centerRight)
+				}
+
+				// Test 4: Monotonic increase from left to center
+				for i := 0; i < n/2-1; i++ {
+					if windowed[i] > windowed[i+1] {
+						t.Errorf("Monotonic violation at i=%d: windowed[%d]=%.10f > windowed[%d]=%.10f",
+							i, i, windowed[i], i+1, windowed[i+1])
+					}
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Input constant doesn't matter - window only depends on index
+			for i := range tt.input {
+				tt.input[i] = 1.0
+			}
+
+			windowed := ApplyHanning(tt.input)
+
+			if len(windowed) != len(tt.input) {
+				t.Fatalf("Output length mismatch: got %d, want %d", len(windowed), len(tt.input))
+			}
+
+			tt.validate(t, windowed)
+		})
+	}
 }
