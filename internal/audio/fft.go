@@ -8,17 +8,6 @@ import (
 	"github.com/linuxmatters/jivefire/internal/config"
 )
 
-// ApplyHanning applies a Hanning window to the input data
-func ApplyHanning(data []float64) []float64 {
-	windowed := make([]float64, len(data))
-	n := len(data)
-	for i := range data {
-		window := 0.5 * (1 - math.Cos(2*math.Pi*float64(i)/float64(n-1)))
-		windowed[i] = data[i] * window
-	}
-	return windowed
-}
-
 // BinFFT bins FFT coefficients into bars and returns normalized values (0.0-1.0)
 // CAVA-style approach: work in normalized space, apply maxBarHeight scaling later
 // baseScale is calculated from Pass 1 analysis for optimal visualization

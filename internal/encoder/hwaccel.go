@@ -3,7 +3,6 @@ package encoder
 import (
 	"os"
 	"runtime"
-	"strings"
 
 	ffmpeg "github.com/linuxmatters/ffmpeg-statigo"
 )
@@ -258,28 +257,4 @@ func SelectBestEncoder(requestedType HWAccelType) *HWEncoder {
 	}
 
 	return nil // Requested type not found
-}
-
-// GetEncoderStatus returns a human-readable status of all hardware encoders
-func GetEncoderStatus() string {
-	encoders := DetectHWEncoders()
-
-	var sb strings.Builder
-	sb.WriteString("Hardware Encoder Status:\n")
-
-	for _, enc := range encoders {
-		status := "not available"
-		if enc.Available {
-			status = "available"
-		}
-		sb.WriteString("  ")
-		sb.WriteString(enc.Description)
-		sb.WriteString(" (")
-		sb.WriteString(enc.Name)
-		sb.WriteString("): ")
-		sb.WriteString(status)
-		sb.WriteString("\n")
-	}
-
-	return sb.String()
 }

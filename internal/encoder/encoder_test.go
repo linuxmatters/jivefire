@@ -5,18 +5,17 @@ import (
 	"testing"
 )
 
-// TestEncoderPOC is a proof-of-concept test that encodes a single black frame
+// TestEncoderPOC is a proof-of-concept test that encodes a single black frame via RGBA path
 func TestEncoderPOC(t *testing.T) {
 	outputPath := "../../testdata/poc-video.mp4"
-	// Keep the file for inspection - comment out cleanup
-	// defer os.Remove(outputPath)
+	defer os.Remove(outputPath)
 
 	config := Config{
 		OutputPath: outputPath,
 		Width:      1280,
 		Height:     720,
 		Framerate:  30,
-		HWAccel:    HWAccelNone, // Force software encoding for WriteFrame (RGB24→YUV420P)
+		HWAccel:    HWAccelNone, // Force software encoding
 	}
 
 	enc, err := New(config)
@@ -30,15 +29,18 @@ func TestEncoderPOC(t *testing.T) {
 	}
 	defer enc.Close()
 
-	// Create a single black frame (RGB24 format)
-	frameSize := config.Width * config.Height * 3 // RGB24 = 3 bytes per pixel
+	// Create a single black frame (RGBA format)
+	frameSize := config.Width * config.Height * 4 // RGBA = 4 bytes per pixel
 	blackFrame := make([]byte, frameSize)
-	// blackFrame is already all zeros (black)
+	// Set alpha channel to opaque
+	for i := 3; i < frameSize; i += 4 {
+		blackFrame[i] = 255
+	}
 
-	// Write one frame
-	err = enc.WriteFrame(blackFrame)
+	// Write one frame using RGBA path
+	err = enc.WriteFrameRGBA(blackFrame)
 	if err != nil {
-		t.Fatalf("Failed to write frame: %v", err)
+		t.Fatalf("Failed to write RGBA frame: %v", err)
 	}
 
 	// Close encoder (writes trailer)

@@ -100,7 +100,7 @@ func AnalyzeAudio(filename string, progressCb ProgressCallback) (*Profile, error
 	frameNum := 0
 
 	for {
-		// Pass fftBuffer directly to ProcessChunk - it creates its own copy via ApplyHanning
+		// Pass fftBuffer directly to ProcessChunk - it applies the pre-computed Hanning window
 		// No need for intermediate allocation since analyzeFrame only reads the buffer
 		coeffs := processor.ProcessChunk(fftBuffer)
 

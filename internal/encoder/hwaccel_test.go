@@ -33,8 +33,3 @@ func TestSelectBestEncoder(t *testing.T) {
 		t.Errorf("Expected nil for HWAccelNone, got %s", enc.Name)
 	}
 }
-
-func TestGetEncoderStatus(t *testing.T) {
-	status := GetEncoderStatus()
-	t.Logf("\n%s", status)
-}

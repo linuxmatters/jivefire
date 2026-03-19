@@ -91,69 +91,6 @@ func parallelRows(height int, fn func(startY, endY int)) {
 	wg.Wait()
 }
 
-// convertRGBToYUV converts RGB24 data to YUV420P (planar) format.
-func convertRGBToYUV(rgbData []byte, yuvFrame *ffmpeg.AVFrame, width, height int) {
-	yPlane := yuvFrame.Data().Get(0)
-	uPlane := yuvFrame.Data().Get(1)
-	vPlane := yuvFrame.Data().Get(2)
-
-	yLinesize := yuvFrame.Linesize().Get(0)
-	uLinesize := yuvFrame.Linesize().Get(1)
-	vLinesize := yuvFrame.Linesize().Get(2)
-
-	parallelRows(height, func(startY, endY int) {
-		// Align startY to even for correct UV row calculation
-		evenStart := startY
-		if evenStart&1 != 0 {
-			evenStart++
-		}
-
-		// Process even rows: Y + UV
-		for y := evenStart; y < endY; y += 2 {
-			yPtr := unsafe.Add(yPlane, y*yLinesize)
-			uvY := y >> 1
-			uRowPtr := unsafe.Add(uPlane, uvY*uLinesize)
-			vRowPtr := unsafe.Add(vPlane, uvY*vLinesize)
-			rgbIdx := y * width * 3
-
-			for x := range width {
-				r := int32(rgbData[rgbIdx])
-				g := int32(rgbData[rgbIdx+1])
-				b := int32(rgbData[rgbIdx+2])
-				rgbIdx += 3
-
-				*(*uint8)(unsafe.Add(yPtr, x)) = rgbToY(r, g, b)
-
-				// UV subsampling: every other pixel on even rows
-				if (x & 1) == 0 {
-					uvX := x >> 1
-					*(*uint8)(unsafe.Add(uRowPtr, uvX)) = rgbToCb(r, g, b)
-					*(*uint8)(unsafe.Add(vRowPtr, uvX)) = rgbToCr(r, g, b)
-				}
-			}
-		}
-
-		// Process odd rows: Y only (no UV)
-		oddStart := startY
-		if oddStart&1 == 0 {
-			oddStart++
-		}
-		for y := oddStart; y < endY; y += 2 {
-			yPtr := unsafe.Add(yPlane, y*yLinesize)
-			rgbIdx := y * width * 3
-
-			for x := range width {
-				r := int32(rgbData[rgbIdx])
-				g := int32(rgbData[rgbIdx+1])
-				b := int32(rgbData[rgbIdx+2])
-				rgbIdx += 3
-
-				*(*uint8)(unsafe.Add(yPtr, x)) = rgbToY(r, g, b)
-			}
-		}
-	})
-}
-
 // convertRGBAToYUV converts RGBA data directly to YUV420P (planar) format.
 // Skips the intermediate RGB24 buffer allocation for significantly faster software encoding.
 func convertRGBAToYUV(rgbaData []byte, yuvFrame *ffmpeg.AVFrame, width, height int) {

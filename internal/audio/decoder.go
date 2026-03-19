@@ -1,7 +1,5 @@
 package audio
 
-import "io"
-
 // Decoder defines the interface for all audio format decoders
 type Decoder interface {
 	// ReadChunk reads the next chunk of samples as float64
@@ -17,6 +15,3 @@ type Decoder interface {
 	// Close closes the decoder and releases resources
 	Close() error
 }
-
-// Ensure io.EOF is available for decoder implementations
-var EOF = io.EOF
