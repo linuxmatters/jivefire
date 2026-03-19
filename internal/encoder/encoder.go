@@ -522,6 +522,14 @@ func (e *Encoder) EncoderName() string {
 	return "libx264"
 }
 
+// outputChannels returns the configured audio channel count, defaulting to mono.
+func (e *Encoder) outputChannels() int {
+	if e.config.AudioChannels == 0 {
+		return 1
+	}
+	return e.config.AudioChannels
+}
+
 // initializeAudioEncoder sets up the AAC encoder for direct sample input.
 // Samples are provided via WriteAudioSamples().
 // Requires SampleRate to be set in Config.
@@ -548,10 +556,7 @@ func (e *Encoder) initializeAudioEncoder() error {
 	e.audioCodec.SetSampleRate(e.config.SampleRate)
 
 	// Set channel configuration based on config (default mono)
-	outputChannels := e.config.AudioChannels
-	if outputChannels == 0 {
-		outputChannels = 1 // Default to mono if not specified
-	}
+	outputChannels := e.outputChannels()
 
 	// Set channel layout using FFmpeg 8.0 API
 	if outputChannels == 1 {
@@ -800,10 +805,7 @@ func (e *Encoder) WriteAudioSamples(samples []float32) error {
 	}
 
 	encoderFrameSize := e.audioCodec.FrameSize() // Should be 1024 for AAC
-	outputChannels := e.config.AudioChannels
-	if outputChannels == 0 {
-		outputChannels = 1
-	}
+	outputChannels := e.outputChannels()
 
 	// Push samples to FIFO
 	e.audioFIFO.Push(samples)
@@ -879,10 +881,7 @@ func (e *Encoder) FlushAudioEncoder() error {
 	}
 
 	encoderFrameSize := e.audioCodec.FrameSize()
-	outputChannels := e.config.AudioChannels
-	if outputChannels == 0 {
-		outputChannels = 1
-	}
+	outputChannels := e.outputChannels()
 
 	// Process any remaining samples in FIFO (may be partial frame)
 	samplesPerFrame := encoderFrameSize * outputChannels

@@ -532,15 +532,34 @@ func (m *Model) renderComplete() string {
 	valueStyle := lipgloss.NewStyle()
 	highlightValueStyle := lipgloss.NewStyle().Foreground(fireOrange)
 
+	totalMs := m.complete.TotalTime.Milliseconds()
+	if totalMs == 0 {
+		totalMs = 1
+	}
+
+	// writeRow writes a simple label-value row
+	writeRow := func(label, value string) {
+		fmt.Fprintf(&s, "  %s%s\n", labelStyle.Render(fmt.Sprintf("%-18s", label)), valueStyle.Render(value))
+	}
+
+	// writeBarRow writes a row with percentage and summary bar
+	writeBarRow := func(label string, duration time.Duration) {
+		pct := int(float64(duration.Milliseconds()) * 100 / float64(totalMs))
+		fmt.Fprintf(&s, "  %s%s (~%2d%%)  %s\n",
+			labelStyle.Render(fmt.Sprintf("%-18s", label)),
+			valueStyle.Render(fmt.Sprintf("~%-6s", formatDuration(duration))),
+			pct, m.summaryBar.ViewAs(float64(duration.Milliseconds())/float64(totalMs)))
+	}
+
 	s.WriteString(headerStyle.Render("Pass 1: Audio Analysis"))
 	s.WriteString("\n")
 
 	if m.audioProfile != nil {
-		fmt.Fprintf(&s, "  %s%s\n", labelStyle.Render(fmt.Sprintf("%-18s", "Duration:")), valueStyle.Render(fmt.Sprintf("%.1fs", m.audioProfile.Duration.Seconds())))
-		fmt.Fprintf(&s, "  %s%s\n", labelStyle.Render(fmt.Sprintf("%-18s", "Peak Level:")), valueStyle.Render(fmt.Sprintf("%.1f dB", m.audioProfile.PeakLevel)))
-		fmt.Fprintf(&s, "  %s%s\n", labelStyle.Render(fmt.Sprintf("%-18s", "RMS Level:")), valueStyle.Render(fmt.Sprintf("%.1f dB", m.audioProfile.RMSLevel)))
-		fmt.Fprintf(&s, "  %s%s\n", labelStyle.Render(fmt.Sprintf("%-18s", "Dynamic Range:")), valueStyle.Render(fmt.Sprintf("%.1f dB", m.audioProfile.DynamicRange)))
-		fmt.Fprintf(&s, "  %s%s\n", labelStyle.Render(fmt.Sprintf("%-18s", "Optimal Scale:")), valueStyle.Render(fmt.Sprintf("%.3f", m.audioProfile.OptimalScale)))
+		writeRow("Duration:", fmt.Sprintf("%.1fs", m.audioProfile.Duration.Seconds()))
+		writeRow("Peak Level:", fmt.Sprintf("%.1f dB", m.audioProfile.PeakLevel))
+		writeRow("RMS Level:", fmt.Sprintf("%.1f dB", m.audioProfile.RMSLevel))
+		writeRow("Dynamic Range:", fmt.Sprintf("%.1f dB", m.audioProfile.DynamicRange))
+		writeRow("Optimal Scale:", fmt.Sprintf("%.3f", m.audioProfile.OptimalScale))
 		fmt.Fprintf(&s, "  %s%s\n", labelStyle.Render(fmt.Sprintf("%-18s", "Analysis Time:")), highlightValueStyle.Render(formatDuration(m.audioProfile.AnalysisTime)))
 	}
 
@@ -550,37 +569,15 @@ func (m *Model) renderComplete() string {
 	s.WriteString(headerStyle.Render("Pass 2: Rendering & Encoding"))
 	s.WriteString("\n")
 
-	totalMs := m.complete.TotalTime.Milliseconds()
-	if totalMs == 0 {
-		totalMs = 1
-	}
-
 	if m.complete.ThumbnailTime > 0 {
-		fmt.Fprintf(&s, "  %s%s (~%2d%%)  %s\n",
-			labelStyle.Render(fmt.Sprintf("%-18s", "Thumbnail:")),
-			valueStyle.Render(fmt.Sprintf("~%-6s", formatDuration(m.complete.ThumbnailTime))),
-			int(float64(m.complete.ThumbnailTime.Milliseconds())*100/float64(totalMs)),
-			m.summaryBar.ViewAs(float64(m.complete.ThumbnailTime.Milliseconds())/float64(totalMs)))
+		writeBarRow("Thumbnail:", m.complete.ThumbnailTime)
 	}
 
-	fmt.Fprintf(&s, "  %s%s (~%2d%%)  %s\n",
-		labelStyle.Render(fmt.Sprintf("%-18s", "Visualisation:")),
-		valueStyle.Render(fmt.Sprintf("~%-6s", formatDuration(m.complete.VisTime))),
-		int(float64(m.complete.VisTime.Milliseconds())*100/float64(totalMs)),
-		m.summaryBar.ViewAs(float64(m.complete.VisTime.Milliseconds())/float64(totalMs)))
-
-	fmt.Fprintf(&s, "  %s%s (~%2d%%)  %s\n",
-		labelStyle.Render(fmt.Sprintf("%-18s", "Video encoding:")),
-		valueStyle.Render(fmt.Sprintf("~%-6s", formatDuration(m.complete.EncodeTime))),
-		int(float64(m.complete.EncodeTime.Milliseconds())*100/float64(totalMs)),
-		m.summaryBar.ViewAs(float64(m.complete.EncodeTime.Milliseconds())/float64(totalMs)))
+	writeBarRow("Visualisation:", m.complete.VisTime)
+	writeBarRow("Video encoding:", m.complete.EncodeTime)
 
 	if m.complete.AudioTime > 0 {
-		fmt.Fprintf(&s, "  %s%s (~%2d%%)  %s\n",
-			labelStyle.Render(fmt.Sprintf("%-18s", "Audio encoding:")),
-			valueStyle.Render(fmt.Sprintf("~%-6s", formatDuration(m.complete.AudioTime))),
-			int(float64(m.complete.AudioTime.Milliseconds())*100/float64(totalMs)),
-			m.summaryBar.ViewAs(float64(m.complete.AudioTime.Milliseconds())/float64(totalMs)))
+		writeBarRow("Audio encoding:", m.complete.AudioTime)
 	}
 
 	// Calculate unaccounted time including finalisation (Pass 2 only)
@@ -599,11 +596,7 @@ func (m *Model) renderComplete() string {
 			strings.Contains(m.complete.EncoderName, "videotoolbox") {
 			otherLabel = "GPU pipeline:"
 		}
-		fmt.Fprintf(&s, "  %s%s (~%2d%%)  %s\n",
-			labelStyle.Render(fmt.Sprintf("%-18s", otherLabel)),
-			valueStyle.Render(fmt.Sprintf("~%-6s", formatDuration(otherTime))),
-			int(float64(otherTime.Milliseconds())*100/float64(totalMs)),
-			m.summaryBar.ViewAs(float64(otherTime.Milliseconds())/float64(totalMs)))
+		writeBarRow(otherLabel, otherTime)
 	}
 
 	fmt.Fprintf(&s, "  %s%s", labelStyle.Render(fmt.Sprintf("%-18s", "Total time:")), highlightValueStyle.Render(formatDuration(m.complete.TotalTime)))
