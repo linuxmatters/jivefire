@@ -1,6 +1,7 @@
 package audio
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -120,7 +121,7 @@ func AnalyzeAudio(filename string, progressCb ProgressCallback) (*Profile, error
 		// Advance sliding buffer for next frame
 		newSamples, err := ReadNextFrame(reader, samplesPerFrame)
 		if err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				// Send final progress update
 				if progressCb != nil {
 					barHeights := make([]float64, config.NumBars)

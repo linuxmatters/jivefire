@@ -16,7 +16,6 @@ import (
 	"golang.org/x/image/draw"
 	"golang.org/x/image/font"
 	"golang.org/x/image/math/f64"
-	"golang.org/x/image/math/fixed"
 )
 
 // getThumbnailTextColor returns the text color for thumbnail (uses runtime config or default)
@@ -73,18 +72,7 @@ func GenerateThumbnail(outputPath string, title string, runtimeConfig *config.Ru
 func loadThumbnailBackground(runtimeConfig *config.RuntimeConfig) (*image.RGBA, error) {
 	imagePath := runtimeConfig.GetThumbnailImagePath()
 
-	var data []byte
-	var err error
-
-	// Check if using custom image path or embedded asset
-	if runtimeConfig.ThumbnailImagePath != "" {
-		// Load from filesystem
-		data, err = os.ReadFile(imagePath)
-	} else {
-		// Load from embedded assets
-		data, err = embeddedAssets.ReadFile(imagePath)
-	}
-
+	data, err := loadImageData(runtimeConfig.ThumbnailImagePath, imagePath)
 	if err != nil {
 		return nil, err
 	}
@@ -144,8 +132,8 @@ func findOptimalFontSize(parsedFont *truetype.Font, line1, line2 string) float64
 		})
 
 		// Measure both lines
-		width1, bounds1 := measureText(face, line1)
-		width2, bounds2 := measureText(face, line2)
+		width1, bounds1 := measureTextBounds(face, line1)
+		width2, bounds2 := measureTextBounds(face, line2)
 
 		face.Close()
 
@@ -177,23 +165,14 @@ func findOptimalFontSize(parsedFont *truetype.Font, line1, line2 string) float64
 	return 10.0 // Minimum fallback size
 }
 
-// measureText returns the width and actual bounds of rendered text
-// Returns width, and the bounds rectangle (Min.Y is negative for ascent, Max.Y is positive for descent)
-func measureText(face font.Face, text string) (int, fixed.Rectangle26_6) {
-	d := &font.Drawer{Face: face}
-	bounds, _ := d.BoundString(text)
-	width := (bounds.Max.X - bounds.Min.X).Ceil()
-	return width, bounds
-}
-
 // drawThumbnailText draws the title text on the thumbnail with a slight rotation
 // Line 1 is top-aligned at the ThumbnailMargin
 // Bottom edge of line 2 must not extend below center line
 // Text is rotated ThumbnailTextRotationDegrees clockwise for dynamic effect
 func drawThumbnailText(img *image.RGBA, face font.Face, line1, line2 string, runtimeConfig *config.RuntimeConfig) {
 	// Measure text dimensions - bounds.Min.Y is negative (ascent), bounds.Max.Y is positive (descent)
-	width1, bounds1 := measureText(face, line1)
-	width2, bounds2 := measureText(face, line2)
+	width1, bounds1 := measureTextBounds(face, line1)
+	width2, bounds2 := measureTextBounds(face, line2)
 
 	// Calculate line spacing (50% of font size for more vertical spacing)
 	metrics := face.Metrics()
@@ -295,15 +274,8 @@ func drawCenteredLineOnTemp(img *image.RGBA, face font.Face, text string, imgWid
 		return
 	}
 
-	d := &font.Drawer{
-		Dst:  img,
-		Src:  image.NewUniform(getThumbnailTextColor(runtimeConfig)),
-		Face: face,
-	}
-
-	// Measure text width
-	bounds, _ := d.BoundString(text)
-	textWidth := (bounds.Max.X - bounds.Min.X).Ceil()
+	d := newTextDrawer(img, face, getThumbnailTextColor(runtimeConfig))
+	textWidth := measureStringWidth(d, text)
 
 	// Center horizontally
 	x := (imgWidth - textWidth) / 2
