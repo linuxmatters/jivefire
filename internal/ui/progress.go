@@ -64,12 +64,6 @@ type RenderProgress struct {
 	AudioCodec  string
 }
 
-// AudioFlushProgress represents progress during audio flushing
-type AudioFlushProgress struct {
-	PacketsProcessed int
-	Elapsed          time.Duration
-}
-
 // RenderComplete signals completion of Pass 2
 type RenderComplete struct {
 	OutputFile       string

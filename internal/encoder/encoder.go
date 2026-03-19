@@ -522,19 +522,6 @@ func (e *Encoder) EncoderName() string {
 	return "libx264"
 }
 
-// EncoderDescription returns a human-readable description of the encoder
-func (e *Encoder) EncoderDescription() string {
-	if e.hwEncoder != nil {
-		return e.hwEncoder.Description
-	}
-	return "Software (libx264)"
-}
-
-// IsHardwareAccelerated returns true if using hardware encoding
-func (e *Encoder) IsHardwareAccelerated() bool {
-	return e.hwEncoder != nil
-}
-
 // initializeAudioEncoder sets up the AAC encoder for direct sample input.
 // Samples are provided via WriteAudioSamples().
 // Requires SampleRate to be set in Config.
@@ -770,73 +757,6 @@ func (e *Encoder) writeFrameHWUpload(rgbaData []byte) error {
 
 	// Receive and write encoded packets
 	return e.receiveAndWriteVideoPackets()
-}
-
-// WriteFrame encodes and writes a single RGB frame
-func (e *Encoder) WriteFrame(rgbData []byte) error {
-	// Validate frame size
-	expectedSize := e.config.Width * e.config.Height * 3 // RGB24 = 3 bytes per pixel
-	if len(rgbData) != expectedSize {
-		return fmt.Errorf("invalid frame size: got %d, expected %d", len(rgbData), expectedSize)
-	}
-
-	// Allocate YUV frame
-	yuvFrame := ffmpeg.AVFrameAlloc()
-	if yuvFrame == nil {
-		return fmt.Errorf("failed to allocate YUV frame")
-	}
-	defer ffmpeg.AVFrameFree(&yuvFrame)
-
-	yuvFrame.SetWidth(e.config.Width)
-	yuvFrame.SetHeight(e.config.Height)
-	yuvFrame.SetFormat(int(ffmpeg.AVPixFmtYuv420P))
-
-	ret, err := ffmpeg.AVFrameGetBuffer(yuvFrame, 0)
-	if err := checkFFmpeg(ret, err, "allocate YUV buffer"); err != nil {
-		return err
-	}
-
-	// Convert RGB to YUV420p using stdlib-optimized implementation
-	convertRGBToYUV(rgbData, yuvFrame, e.config.Width, e.config.Height)
-
-	// Set presentation timestamp
-	yuvFrame.SetPts(e.nextVideoPts)
-	e.nextVideoPts++
-
-	// Send frame to encoder
-	ret, err = ffmpeg.AVCodecSendFrame(e.videoCodec, yuvFrame)
-	if err := checkFFmpeg(ret, err, "send frame to encoder"); err != nil {
-		return err
-	}
-
-	// Receive and write encoded packets
-	for {
-		pkt := ffmpeg.AVPacketAlloc()
-
-		_, err := ffmpeg.AVCodecReceivePacket(e.videoCodec, pkt)
-		if err != nil {
-			ffmpeg.AVPacketFree(&pkt)
-			// EAGAIN and EOF are expected - means no more packets available
-			if errors.Is(err, ffmpeg.EAgain) || errors.Is(err, ffmpeg.AVErrorEOF) {
-				break
-			}
-			return fmt.Errorf("receive packet: %w", err)
-		}
-
-		// Set stream index and rescale timestamps
-		pkt.SetStreamIndex(e.videoStream.Index())
-		ffmpeg.AVPacketRescaleTs(pkt, e.videoCodec.TimeBase(), e.videoStream.TimeBase())
-
-		// Write packet to output
-		ret, err = ffmpeg.AVInterleavedWriteFrame(e.formatCtx, pkt)
-		ffmpeg.AVPacketFree(&pkt)
-
-		if err := checkFFmpeg(ret, err, "write packet"); err != nil {
-			return err
-		}
-	}
-
-	return nil
 }
 
 // receiveAndWriteVideoPackets receives encoded packets from video codec and writes to output
@@ -1146,9 +1066,4 @@ func (e *Encoder) Close() error {
 	}
 
 	return nil
-}
-
-// GetVideoFramesEncoded returns the number of video frames encoded so far
-func (e *Encoder) GetVideoFramesEncoded() int64 {
-	return e.nextVideoPts
 }

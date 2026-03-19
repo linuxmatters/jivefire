@@ -3,8 +3,6 @@ package audio
 import (
 	"math"
 	"testing"
-
-	"github.com/argusdusty/gofft"
 )
 
 // TestBinFFT_KnownSineWave verifies that BinFFT correctly identifies a known
@@ -39,14 +37,9 @@ func TestBinFFT_KnownSineWave(t *testing.T) {
 	// Take first FFT window (2048 samples)
 	windowSamples := sine[:fftSize]
 
-	// Apply Hanning window (same as in ProcessChunk)
-	windowed := ApplyHanning(windowSamples)
-
-	// Compute FFT
-	fftInput := gofft.Float64ToComplex128Array(windowed)
-	if err := gofft.FFT(fftInput); err != nil {
-		t.Fatalf("FFT computation failed: %v", err)
-	}
+	// Process through the live code path (Hanning window + FFT)
+	processor := NewProcessor()
+	fftInput := processor.ProcessChunk(windowSamples)
 
 	// Bin the FFT results into 64 bars
 	result := make([]float64, numBars)
@@ -164,11 +157,9 @@ func TestBinFFT_NoiseGate(t *testing.T) {
 		quietSignal[i] = 0.001 * math.Sin(2*math.Pi*float64(i)/100.0)
 	}
 
-	windowed := ApplyHanning(quietSignal)
-	fftInput := gofft.Float64ToComplex128Array(windowed)
-	if err := gofft.FFT(fftInput); err != nil {
-		t.Fatalf("FFT computation failed: %v", err)
-	}
+	// Process through the live code path (Hanning window + FFT)
+	processor := NewProcessor()
+	fftInput := processor.ProcessChunk(quietSignal)
 
 	result := make([]float64, numBars)
 	BinFFT(fftInput, sensitivity, baseScale, result)
@@ -206,11 +197,9 @@ func TestBinFFT_EnergyDistribution(t *testing.T) {
 			math.Sin(2*math.Pi*1000*float64(i)/float64(fftSize)))
 	}
 
-	windowed := ApplyHanning(signal)
-	fftInput := gofft.Float64ToComplex128Array(windowed)
-	if err := gofft.FFT(fftInput); err != nil {
-		t.Fatalf("FFT computation failed: %v", err)
-	}
+	// Process through the live code path (Hanning window + FFT)
+	processor := NewProcessor()
+	fftInput := processor.ProcessChunk(signal)
 
 	result := make([]float64, numBars)
 	BinFFT(fftInput, sensitivity, baseScale, result)
@@ -239,55 +228,6 @@ func TestBinFFT_EnergyDistribution(t *testing.T) {
 	}
 
 	t.Logf("Energy distribution: %.6f total energy across %d/%d bars", totalEnergy, nonzeroCount, numBars)
-}
-
-// TestApplyHanning_WindowProperties verifies Hanning window coefficients
-// match expected mathematical properties.
-func TestApplyHanning_WindowProperties(t *testing.T) {
-	// Test with small known size
-	size := 8
-	input := make([]float64, size)
-	for i := range input {
-		input[i] = 1.0 // All ones
-	}
-
-	windowed := ApplyHanning(input)
-
-	if len(windowed) != size {
-		t.Fatalf("Window size mismatch: got %d, want %d", len(windowed), size)
-	}
-
-	// Hanning window properties:
-	// 1. Output length equals input length
-	if len(windowed) != len(input) {
-		t.Errorf("Window changed input length")
-	}
-
-	// 2. Start and end values should be zero (or very close)
-	epsilon := 1e-10
-	if math.Abs(windowed[0]) > epsilon {
-		t.Errorf("Window start value %.15f is not zero", windowed[0])
-	}
-	if math.Abs(windowed[size-1]) > epsilon {
-		t.Errorf("Window end value %.15f is not zero", windowed[size-1])
-	}
-
-	// 3. Center value should be ~1.0 (maximum of Hanning window)
-	midPoint := windowed[size/2]
-	if midPoint < 0.9 || midPoint > 1.05 {
-		t.Errorf("Window center value %.6f not close to 1.0", midPoint)
-	}
-
-	// 4. Window should be symmetric
-	for i := 0; i < size/2; i++ {
-		if math.Abs(windowed[i]-windowed[size-1-i]) > epsilon {
-			t.Errorf("Window not symmetric at position %d: %.15f != %.15f",
-				i, windowed[i], windowed[size-1-i])
-		}
-	}
-
-	t.Logf("Hanning window verified: start=%.15f, center=%.6f, end=%.15f",
-		windowed[0], windowed[size/2], windowed[size-1])
 }
 
 // TestRearrangeFrequenciesCenterOut_Symmetry verifies that the output array
@@ -442,138 +382,6 @@ func TestRearrangeFrequenciesCenterOut_SmallInput(t *testing.T) {
 	t.Logf("Small input test passed: %v → %v", input, result)
 }
 
-// TestApplyHanning_KnownValues verifies Hanning window coefficients match expected values.
-// This catches formula errors that would affect FFT accuracy.
-//
-// Hanning window formula: w[i] = 0.5 * (1 - cos(2π*i/(N-1)))
-// Properties tested:
-// - Window is symmetric: w[i] == w[N-1-i]
-// - Window has zero endpoints: w[0] == w[N-1] == 0
-// - Window peaks at center: w[N/2] == 1.0
-func TestApplyHanning_KnownValues(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    []float64
-		validate func(t *testing.T, windowed []float64)
-	}{
-		{
-			name:  "4-element window",
-			input: []float64{1, 1, 1, 1},
-			validate: func(t *testing.T, windowed []float64) {
-				// Hanning window for N=4:
-				// w[0] = 0.5 * (1 - cos(0)) = 0.5 * (1 - 1) = 0
-				// w[1] = 0.5 * (1 - cos(2π*1/3)) = 0.5 * (1 - (-0.5)) = 0.75
-				// w[2] = 0.5 * (1 - cos(2π*2/3)) = 0.5 * (1 - (-0.5)) = 0.75
-				// w[3] = 0.5 * (1 - cos(2π)) = 0.5 * (1 - 1) = 0
-
-				expected := []float64{0, 0.75, 0.75, 0}
-				const epsilon = 1e-10
-
-				for i, v := range windowed {
-					if math.Abs(v-expected[i]) > epsilon {
-						t.Errorf("w[%d]: got %.10f, want %.10f", i, v, expected[i])
-					}
-				}
-
-				// Verify symmetry
-				if math.Abs(windowed[0]-windowed[3]) > epsilon {
-					t.Errorf("Symmetry: windowed[0]=%.10f != windowed[3]=%.10f", windowed[0], windowed[3])
-				}
-				if math.Abs(windowed[1]-windowed[2]) > epsilon {
-					t.Errorf("Symmetry: windowed[1]=%.10f != windowed[2]=%.10f", windowed[1], windowed[2])
-				}
-			},
-		},
-		{
-			name:  "8-element window",
-			input: []float64{2, 2, 2, 2, 2, 2, 2, 2},
-			validate: func(t *testing.T, windowed []float64) {
-				// Verify zero endpoints
-				const epsilon = 1e-10
-				if math.Abs(windowed[0]) > epsilon {
-					t.Errorf("w[0] should be ~0, got %.10f", windowed[0])
-				}
-				if math.Abs(windowed[7]) > epsilon {
-					t.Errorf("w[7] should be ~0, got %.10f", windowed[7])
-				}
-
-				// Verify symmetry around center
-				for i := range 4 {
-					if math.Abs(windowed[i]-windowed[7-i]) > epsilon {
-						t.Errorf("Symmetry violation at i=%d: windowed[%d]=%.10f != windowed[%d]=%.10f",
-							i, i, windowed[i], 7-i, windowed[7-i])
-					}
-				}
-
-				// Verify peak near center
-				peakValue := windowed[3] // or windowed[4]
-				if peakValue < 0.95 || peakValue > 1.05 {
-					t.Errorf("Peak value at center should be ~1.0, got %.10f", peakValue)
-				}
-			},
-		},
-		{
-			name:  "Hanning window properties on 2048-sample",
-			input: make([]float64, 2048),
-			validate: func(t *testing.T, windowed []float64) {
-				const epsilon = 1e-10
-				n := len(windowed)
-
-				// Test 1: Zero endpoints
-				if math.Abs(windowed[0]) > epsilon {
-					t.Errorf("w[0] should be ~0, got %.10f", windowed[0])
-				}
-				if math.Abs(windowed[n-1]) > epsilon {
-					t.Errorf("w[%d] should be ~0, got %.10f", n-1, windowed[n-1])
-				}
-
-				// Test 2: Perfect symmetry
-				for i := 0; i < n/2; i++ {
-					if math.Abs(windowed[i]-windowed[n-1-i]) > epsilon {
-						t.Errorf("Symmetry violation at i=%d: windowed[%d]=%.10f != windowed[%d]=%.10f",
-							i, i, windowed[i], n-1-i, windowed[n-1-i])
-					}
-				}
-
-				// Test 3: Peak at center (index 1023 or 1024 for N=2048)
-				centerLeft := windowed[1023]
-				centerRight := windowed[1024]
-				if centerLeft < 0.99 || centerLeft > 1.01 {
-					t.Errorf("Peak at center-left (1023): got %.10f, want ~1.0", centerLeft)
-				}
-				if centerRight < 0.99 || centerRight > 1.01 {
-					t.Errorf("Peak at center-right (1024): got %.10f, want ~1.0", centerRight)
-				}
-
-				// Test 4: Monotonic increase from left to center
-				for i := 0; i < n/2-1; i++ {
-					if windowed[i] > windowed[i+1] {
-						t.Errorf("Monotonic violation at i=%d: windowed[%d]=%.10f > windowed[%d]=%.10f",
-							i, i, windowed[i], i+1, windowed[i+1])
-					}
-				}
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Input constant doesn't matter - window only depends on index
-			for i := range tt.input {
-				tt.input[i] = 1.0
-			}
-
-			windowed := ApplyHanning(tt.input)
-
-			if len(windowed) != len(tt.input) {
-				t.Fatalf("Output length mismatch: got %d, want %d", len(windowed), len(tt.input))
-			}
-
-			tt.validate(t, windowed)
-		})
-	}
-}
-
 // BenchmarkProcessChunk measures FFT processing performance with pre-computed Hanning window.
 // This is the hot path called for every FFT frame during both analysis and render passes.
 func BenchmarkProcessChunk(b *testing.B) {
@@ -591,22 +399,6 @@ func BenchmarkProcessChunk(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		_ = processor.ProcessChunk(samples)
-	}
-}
-
-// BenchmarkApplyHanning measures the standalone Hanning window function (with trig per sample).
-// This is the old approach - kept for comparison with pre-computed version.
-func BenchmarkApplyHanning(b *testing.B) {
-	samples := make([]float64, 2048)
-	for i := range samples {
-		samples[i] = math.Sin(float64(i)*0.1) * 0.5
-	}
-
-	b.ResetTimer()
-	b.ReportAllocs()
-
-	for i := 0; i < b.N; i++ {
-		_ = ApplyHanning(samples)
 	}
 }
 

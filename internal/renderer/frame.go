@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"sync"
 
 	"github.com/linuxmatters/jivefire/internal/config"
 	"golang.org/x/image/font"
@@ -30,12 +29,6 @@ type Frame struct {
 	barColorTable   [][3]uint8 // Pre-computed bar colors at different intensity levels
 	framingLineData []byte     // Pre-rendered framing line pixel pattern
 	hasBackground   bool
-}
-
-var framePool = sync.Pool{
-	New: func() any {
-		return image.NewRGBA(image.Rect(0, 0, config.Width, config.Height))
-	},
 }
 
 // NewFrame creates a new optimized frame renderer
@@ -87,7 +80,7 @@ func NewFrame(bgImage *image.RGBA, fontFace font.Face, episodeNum int, title str
 	}
 
 	f := &Frame{
-		img:             framePool.Get().(*image.RGBA),
+		img:             image.NewRGBA(image.Rect(0, 0, config.Width, config.Height)),
 		bgImage:         bgImage,
 		fontFace:        fontFace,
 		centerY:         centerY,
@@ -318,12 +311,4 @@ func formatEpisodeNumber(num int) string {
 // GetImage returns the current frame image
 func (f *Frame) GetImage() *image.RGBA {
 	return f.img
-}
-
-// Release returns the frame buffer to the pool
-func (f *Frame) Release() {
-	if f.img != nil {
-		framePool.Put(f.img)
-		f.img = nil
-	}
 }

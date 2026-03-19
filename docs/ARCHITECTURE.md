@@ -92,7 +92,7 @@ MP4 Muxer (libavformat)
 ## Key Technical Choices
 
 ### Audio Frame Size Mismatch
-FFT analysis requires 2048 samples for frequency resolution, but AAC encoder expects 1024 samples per frame. **Solution:** `SharedAudioBuffer` in `audio/shared_buffer.go` provides thread-safe multi-consumer access with independent read positions—FFT and encoder each consume at their own rate without blocking each other.
+FFT analysis requires 2048 samples for frequency resolution, but AAC encoder expects 1024 samples per frame. **Solution:** `AudioFIFO` in `encoder/encoder.go` buffers incoming audio samples and drains them in encoder-sized frames, decoupling the FFT chunk size from the AAC frame size.
 
 ### Hardware-Accelerated Encoding
 Automatic GPU encoder detection in `encoder/hwaccel.go`:
