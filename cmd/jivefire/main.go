@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"image"
 	"io"
@@ -72,7 +73,7 @@ func main() {
 
 	// Show help if no arguments provided
 	if CLI.Input == "" && CLI.Output == "" {
-		ctx.PrintUsage(true)
+		_ = ctx.PrintUsage(true)
 		os.Exit(0)
 	}
 
@@ -201,7 +202,7 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 	thumbnailDuration := time.Since(thumbnailStartTime)
 
 	// Get audio metadata upfront for Pass 1 progress estimation
-	metadata, err := audio.GetAudioMetadata(inputFile)
+	metadata, err := audio.GetMetadata(inputFile)
 	if err != nil {
 		cli.PrintError(fmt.Sprintf("reading audio metadata: %v", err))
 		os.Exit(1)
@@ -217,7 +218,7 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 	p := tea.NewProgram(model, tea.WithAltScreen())
 
 	// Shared state between goroutines
-	var profile *audio.AudioProfile
+	var profile *audio.Profile
 	var analysisErr error
 
 	// Run both passes in a single goroutine
@@ -279,7 +280,7 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 	}
 }
 
-func runPass2(p *tea.Program, inputFile string, outputFile string, channels int, noPreview bool, hwAccel encoder.HWAccelType, runtimeConfig *config.RuntimeConfig, profile *audio.AudioProfile, thumbnailDuration time.Duration, overallStartTime time.Time) {
+func runPass2(p *tea.Program, inputFile string, outputFile string, channels int, noPreview bool, hwAccel encoder.HWAccelType, runtimeConfig *config.RuntimeConfig, profile *audio.Profile, thumbnailDuration time.Duration, overallStartTime time.Time) {
 	// Open streaming reader for Pass 2
 	reader, err := audio.NewStreamingReader(inputFile)
 	if err != nil {
@@ -386,7 +387,7 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 	for len(initialSamples) < config.FFTSize {
 		chunk, err := reader.ReadChunk(config.FFTSize - len(initialSamples))
 		if err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				break // Use what we have
 			}
 			cli.PrintError(fmt.Sprintf("error reading initial audio chunk: %v", err))
@@ -559,7 +560,7 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 		for len(newSamples) < samplesPerFrame {
 			chunk, err := reader.ReadChunk(samplesPerFrame - len(newSamples))
 			if err != nil {
-				if err == io.EOF {
+				if errors.Is(err, io.EOF) {
 					// If we got no new samples at all, we're done
 					if len(newSamples) == 0 {
 						// Break out of the frame loop - no more audio

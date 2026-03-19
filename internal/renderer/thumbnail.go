@@ -206,9 +206,7 @@ func drawThumbnailText(img *image.RGBA, face font.Face, line1, line2 string, run
 
 	// Calculate total text block dimensions
 	maxWidth := width1
-	if width2 > maxWidth {
-		maxWidth = width2
-	}
+	maxWidth = max(maxWidth, width2)
 	totalHeight := height1 + lineSpacing + height2
 
 	// Create a temporary image for drawing text (larger to accommodate rotation)

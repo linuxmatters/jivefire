@@ -233,10 +233,10 @@ func TestAudioFIFO_SequentialOperations(t *testing.T) {
 	fifo := NewAudioFIFO(1024)
 
 	// Push and pop multiple times
-	for round := 0; round < 5; round++ {
+	for round := range 5 {
 		// Push 10 samples
 		samples := make([]float32, 10)
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			samples[i] = float32(round*10 + i)
 		}
 		fifo.Push(samples)
@@ -281,7 +281,7 @@ func TestAudioFIFO_LargeValues(t *testing.T) {
 	// Push a large number of samples
 	largeCount := 100000
 	samples := make([]float32, largeCount)
-	for i := 0; i < largeCount; i++ {
+	for i := range largeCount {
 		samples[i] = float32(i)
 	}
 	fifo.Push(samples)

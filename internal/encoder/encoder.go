@@ -48,7 +48,7 @@ func NewAudioFIFO(frameSize int) *AudioFIFO {
 		buffer:    make([]float32, 0, 4096), // Start with reasonable capacity
 		frameSize: frameSize,
 		pool: &sync.Pool{
-			New: func() interface{} {
+			New: func() any {
 				s := make([]float32, frameSize)
 				return &s
 			},
@@ -278,25 +278,23 @@ func (e *Encoder) Initialize() error {
 
 	if e.hwEncoder != nil {
 		// Hardware encoder options
-		if err := e.setHWEncoderOptions(&opts); err != nil {
-			return fmt.Errorf("failed to set hardware encoder options: %w", err)
-		}
+		e.setHWEncoderOptions(&opts)
 	} else {
 		// Software encoder (x264) options optimized for visualization content
 		// CRF 24 = good quality for busy visualizations
-		ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("crf"), ffmpeg.ToCStr("24"), 0)
+		_, _ = ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("crf"), ffmpeg.ToCStr("24"), 0)
 		// Faster preset prioritizes encoding speed
-		ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("preset"), ffmpeg.ToCStr("veryfast"), 0)
+		_, _ = ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("preset"), ffmpeg.ToCStr("veryfast"), 0)
 		// Tune for animation content
-		ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("tune"), ffmpeg.ToCStr("animation"), 0)
+		_, _ = ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("tune"), ffmpeg.ToCStr("animation"), 0)
 		// Main profile for faster encoding and broad compatibility
-		ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("profile"), ffmpeg.ToCStr("main"), 0)
+		_, _ = ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("profile"), ffmpeg.ToCStr("main"), 0)
 		// Single reference frame (simple vertical bar motion doesn't need multiple refs)
-		ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("ref"), ffmpeg.ToCStr("1"), 0)
+		_, _ = ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("ref"), ffmpeg.ToCStr("1"), 0)
 		// Reduce b-frames for faster encoding (predictable bar motion)
-		ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("bf"), ffmpeg.ToCStr("1"), 0)
+		_, _ = ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("bf"), ffmpeg.ToCStr("1"), 0)
 		// Simpler subpixel motion estimation (bars move in discrete pixels)
-		ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("subme"), ffmpeg.ToCStr("4"), 0)
+		_, _ = ffmpeg.AVDictSet(&opts, ffmpeg.ToCStr("subme"), ffmpeg.ToCStr("4"), 0)
 	}
 
 	// Open codec with options
@@ -336,71 +334,69 @@ func (e *Encoder) Initialize() error {
 }
 
 // setHWEncoderOptions configures encoder-specific options for hardware encoders
-func (e *Encoder) setHWEncoderOptions(opts **ffmpeg.AVDictionary) error {
+func (e *Encoder) setHWEncoderOptions(opts **ffmpeg.AVDictionary) {
 	if e.hwEncoder == nil {
-		return nil
+		return
 	}
 
 	switch e.hwEncoder.Type {
 	case HWAccelNVENC:
 		// NVENC options optimized for fast visualisation encoding
 		// Preset p2 = faster encoding with acceptable quality (p1=fastest, p7=slowest)
-		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("preset"), ffmpeg.ToCStr("p1"), 0)
+		_, _ = ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("preset"), ffmpeg.ToCStr("p1"), 0)
 		// Low latency tuning - reduces pipeline delay
-		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("tune"), ffmpeg.ToCStr("ull"), 0)
+		_, _ = ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("tune"), ffmpeg.ToCStr("ull"), 0)
 		// Target quality (CQ mode) - similar to CRF, lower=better (0-51)
-		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("rc"), ffmpeg.ToCStr("vbr"), 0)
-		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("cq"), ffmpeg.ToCStr("24"), 0)
+		_, _ = ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("rc"), ffmpeg.ToCStr("vbr"), 0)
+		_, _ = ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("cq"), ffmpeg.ToCStr("24"), 0)
 		// Main profile for broad compatibility
-		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("profile"), ffmpeg.ToCStr("main"), 0)
+		_, _ = ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("profile"), ffmpeg.ToCStr("main"), 0)
 		// No B-frames for faster encoding (visualisation has low motion)
-		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("bf"), ffmpeg.ToCStr("0"), 0)
+		_, _ = ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("bf"), ffmpeg.ToCStr("0"), 0)
 		// Zero latency mode - no reordering delay
-		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("zerolatency"), ffmpeg.ToCStr("1"), 0)
+		_, _ = ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("zerolatency"), ffmpeg.ToCStr("1"), 0)
 
 	case HWAccelQSV:
 		// Intel Quick Sync Video options
-		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("preset"), ffmpeg.ToCStr("medium"), 0)
-		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("global_quality"), ffmpeg.ToCStr("24"), 0)
-		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("profile"), ffmpeg.ToCStr("main"), 0)
+		_, _ = ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("preset"), ffmpeg.ToCStr("medium"), 0)
+		_, _ = ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("global_quality"), ffmpeg.ToCStr("24"), 0)
+		_, _ = ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("profile"), ffmpeg.ToCStr("main"), 0)
 
 	case HWAccelVulkan:
 		// Vulkan Video options optimized for fast visualisation encoding
-		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("content"), ffmpeg.ToCStr("rendered"), 0)
+		_, _ = ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("content"), ffmpeg.ToCStr("rendered"), 0)
 		// Quality level (0-51, lower=better) - same as NVENC CQ
-		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("qp"), ffmpeg.ToCStr("24"), 0)
+		_, _ = ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("qp"), ffmpeg.ToCStr("24"), 0)
 		// Low latency tuning - reduces pipeline delay
-		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("tune"), ffmpeg.ToCStr("ull"), 0)
+		_, _ = ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("tune"), ffmpeg.ToCStr("ull"), 0)
 		// Increase async depth for more parallelism (default=2)
-		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("async_depth"), ffmpeg.ToCStr("4"), 0)
+		_, _ = ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("async_depth"), ffmpeg.ToCStr("4"), 0)
 		// Main profile for broad compatibility
-		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("profile"), ffmpeg.ToCStr("main"), 0)
+		_, _ = ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("profile"), ffmpeg.ToCStr("main"), 0)
 		// Minimal B-frame depth (1 is minimum)
-		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("b_depth"), ffmpeg.ToCStr("1"), 0)
+		_, _ = ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("b_depth"), ffmpeg.ToCStr("1"), 0)
 
 	case HWAccelVAAPI:
 		// VA-API options optimized for fast visualisation encoding
 		// Quality level (1-51, lower=better) - CQP rate control
-		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("qp"), ffmpeg.ToCStr("24"), 0)
+		_, _ = ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("qp"), ffmpeg.ToCStr("24"), 0)
 		// Main profile for broad compatibility
-		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("profile"), ffmpeg.ToCStr("main"), 0)
+		_, _ = ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("profile"), ffmpeg.ToCStr("main"), 0)
 		// Low latency: disable B-frames for faster encoding
-		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("bf"), ffmpeg.ToCStr("0"), 0)
+		_, _ = ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("bf"), ffmpeg.ToCStr("0"), 0)
 
 	case HWAccelVideoToolbox:
 		// Apple VideoToolbox options optimised for fast visualisation encoding
 		// Note: VideoToolbox does not support constant quality (CRF/CQ) encoding.
 		// It uses bitrate-based rate control only, so we cannot set quality levels
 		// like other hardware encoders. The encoder will use default VBR settings.
-		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("profile"), ffmpeg.ToCStr("main"), 0)
-		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("level"), ffmpeg.ToCStr("4.1"), 0)
+		_, _ = ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("profile"), ffmpeg.ToCStr("main"), 0)
+		_, _ = ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("level"), ffmpeg.ToCStr("4.1"), 0)
 		// Real-time encoding hint - prioritises speed for live/visualisation use
-		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("realtime"), ffmpeg.ToCStr("1"), 0)
+		_, _ = ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("realtime"), ffmpeg.ToCStr("1"), 0)
 		// Require hardware encoding - fail if hardware unavailable
-		ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("allow_sw"), ffmpeg.ToCStr("0"), 0)
+		_, _ = ffmpeg.AVDictSet(opts, ffmpeg.ToCStr("allow_sw"), ffmpeg.ToCStr("0"), 0)
 	}
-
-	return nil
 }
 
 // setupHWFramesContext creates and configures the hardware frames context
@@ -662,9 +658,7 @@ func (e *Encoder) writeFrameRGBASoftware(rgbaData []byte) error {
 	}
 
 	// Convert RGBA directly to YUV420P (skips RGB24 intermediate)
-	if err := convertRGBAToYUV(rgbaData, yuvFrame, e.config.Width, e.config.Height); err != nil {
-		return fmt.Errorf("RGBA to YUV conversion failed: %w", err)
-	}
+	convertRGBAToYUV(rgbaData, yuvFrame, e.config.Width, e.config.Height)
 
 	// Set presentation timestamp
 	yuvFrame.SetPts(e.nextVideoPts)
@@ -707,10 +701,10 @@ func (e *Encoder) writeFrameRGBADirect(rgbaData []byte) error {
 
 	// Copy row by row (frame may have padding)
 	srcStride := width * 4
-	for y := 0; y < height; y++ {
+	for y := range height {
 		srcOffset := y * srcStride
 		dstOffset := y * linesize
-		copy(unsafe.Slice((*byte)(unsafe.Pointer(uintptr(unsafe.Pointer(data))+uintptr(dstOffset))), srcStride),
+		copy(unsafe.Slice((*byte)(unsafe.Add(data, dstOffset)), srcStride), //nolint:gosec // offset is within allocated frame
 			rgbaData[srcOffset:srcOffset+srcStride])
 	}
 
@@ -740,9 +734,7 @@ func (e *Encoder) writeFrameHWUpload(rgbaData []byte) error {
 	nv12Frame := e.hwNV12Frame
 
 	// Convert RGBA → NV12 using parallel Go conversion (much faster than SwsScaleFrame)
-	if err := convertRGBAToNV12(rgbaData, nv12Frame, width, height); err != nil {
-		return fmt.Errorf("failed to convert RGBA to NV12: %w", err)
-	}
+	convertRGBAToNV12(rgbaData, nv12Frame, width, height)
 
 	// Allocate hardware frame from pool
 	// Note: hwFrame must be allocated per-call as it's returned to pool after encoding
@@ -803,9 +795,7 @@ func (e *Encoder) WriteFrame(rgbData []byte) error {
 	}
 
 	// Convert RGB to YUV420p using stdlib-optimized implementation
-	if err := convertRGBToYUV(rgbData, yuvFrame, e.config.Width, e.config.Height); err != nil {
-		return fmt.Errorf("RGB to YUV conversion failed: %w", err)
-	}
+	convertRGBToYUV(rgbData, yuvFrame, e.config.Width, e.config.Height)
 
 	// Set presentation timestamp
 	yuvFrame.SetPts(e.nextVideoPts)
@@ -821,7 +811,7 @@ func (e *Encoder) WriteFrame(rgbData []byte) error {
 	for {
 		pkt := ffmpeg.AVPacketAlloc()
 
-		ret, err := ffmpeg.AVCodecReceivePacket(e.videoCodec, pkt)
+		_, err := ffmpeg.AVCodecReceivePacket(e.videoCodec, pkt)
 		if err != nil {
 			ffmpeg.AVPacketFree(&pkt)
 			// EAGAIN and EOF are expected - means no more packets available
@@ -852,7 +842,7 @@ func (e *Encoder) receiveAndWriteVideoPackets() error {
 	for {
 		pkt := ffmpeg.AVPacketAlloc()
 
-		ret, err := ffmpeg.AVCodecReceivePacket(e.videoCodec, pkt)
+		_, err := ffmpeg.AVCodecReceivePacket(e.videoCodec, pkt)
 		if err != nil {
 			ffmpeg.AVPacketFree(&pkt)
 			// EAGAIN and EOF are expected - means no more packets available
@@ -867,7 +857,7 @@ func (e *Encoder) receiveAndWriteVideoPackets() error {
 		ffmpeg.AVPacketRescaleTs(pkt, e.videoCodec.TimeBase(), e.videoStream.TimeBase())
 
 		// Write packet to output
-		ret, err = ffmpeg.AVInterleavedWriteFrame(e.formatCtx, pkt)
+		ret, err := ffmpeg.AVInterleavedWriteFrame(e.formatCtx, pkt)
 		ffmpeg.AVPacketFree(&pkt)
 
 		if err := checkFFmpeg(ret, err, "write packet"); err != nil {
@@ -903,7 +893,7 @@ func (e *Encoder) WriteAudioSamples(samples []float32) error {
 		frameSamples := e.audioFIFO.Pop(samplesPerFrame)
 
 		// Make frame writable and write samples
-		ffmpeg.AVFrameMakeWritable(e.audioEncFrame)
+		_, _ = ffmpeg.AVFrameMakeWritable(e.audioEncFrame)
 
 		var writeErr error
 		if outputChannels == 2 {
@@ -933,7 +923,7 @@ func (e *Encoder) WriteAudioSamples(samples []float32) error {
 		// Receive encoded packets
 		for {
 			encodedPkt := ffmpeg.AVPacketAlloc()
-			ret, err = ffmpeg.AVCodecReceivePacket(e.audioCodec, encodedPkt)
+			_, err = ffmpeg.AVCodecReceivePacket(e.audioCodec, encodedPkt)
 			if err != nil {
 				ffmpeg.AVPacketFree(&encodedPkt)
 				// EAGAIN and EOF are expected - means no more packets available
@@ -983,7 +973,7 @@ func (e *Encoder) FlushAudioEncoder() error {
 		// Return partial slice to pool (safe even for non-pooled sizes)
 		e.audioFIFO.ReturnSlice(partialSamples)
 
-		ffmpeg.AVFrameMakeWritable(e.audioEncFrame)
+		_, _ = ffmpeg.AVFrameMakeWritable(e.audioEncFrame)
 
 		var writeErr error
 		if outputChannels == 2 {
@@ -1006,7 +996,7 @@ func (e *Encoder) FlushAudioEncoder() error {
 	}
 
 	// Flush encoder by sending NULL frame
-	ffmpeg.AVCodecSendFrame(e.audioCodec, nil)
+	_, _ = ffmpeg.AVCodecSendFrame(e.audioCodec, nil)
 
 	// Receive all remaining packets
 	for {
@@ -1020,7 +1010,7 @@ func (e *Encoder) FlushAudioEncoder() error {
 		encodedPkt.SetStreamIndex(e.audioStream.Index())
 		ffmpeg.AVPacketRescaleTs(encodedPkt, e.audioCodec.TimeBase(), e.audioStream.TimeBase())
 
-		ffmpeg.AVInterleavedWriteFrame(e.formatCtx, encodedPkt)
+		_, _ = ffmpeg.AVInterleavedWriteFrame(e.formatCtx, encodedPkt)
 		ffmpeg.AVPacketFree(&encodedPkt)
 	}
 
@@ -1039,10 +1029,10 @@ func writeMonoFloats(frame *ffmpeg.AVFrame, samples []float32) error {
 	}
 
 	// Convert to byte slice for writing
-	data := (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[: nbSamples*4 : nbSamples*4]
+	data := (*[1 << 30]byte)(dataPtr)[: nbSamples*4 : nbSamples*4]
 
 	// Write samples to channel
-	for i := 0; i < nbSamples; i++ {
+	for i := range nbSamples {
 		// Write channel - direct float32 byte copy
 		sampleFloat := samples[i]
 		copy(data[i*4:(i+1)*4], (*[4]byte)(unsafe.Pointer(&sampleFloat))[:])
@@ -1064,11 +1054,11 @@ func writeStereoFloats(frame *ffmpeg.AVFrame, samples []float32) error {
 	}
 
 	// Convert to byte slices for writing
-	leftData := (*[1 << 30]byte)(unsafe.Pointer(leftPtr))[: nbSamples*4 : nbSamples*4]
-	rightData := (*[1 << 30]byte)(unsafe.Pointer(rightPtr))[: nbSamples*4 : nbSamples*4]
+	leftData := (*[1 << 30]byte)(leftPtr)[: nbSamples*4 : nbSamples*4]
+	rightData := (*[1 << 30]byte)(rightPtr)[: nbSamples*4 : nbSamples*4]
 
 	// Write samples to both channels
-	for i := 0; i < nbSamples; i++ {
+	for i := range nbSamples {
 		// Write left channel - direct float32 byte copy
 		leftFloat := samples[i*2]
 		copy(leftData[i*4:(i+1)*4], (*[4]byte)(unsafe.Pointer(&leftFloat))[:])
@@ -1083,10 +1073,9 @@ func writeStereoFloats(frame *ffmpeg.AVFrame, samples []float32) error {
 
 // Close finalizes the output file and frees resources
 func (e *Encoder) Close() error {
-
 	// Flush encoder
 	if e.videoCodec != nil {
-		ffmpeg.AVCodecSendFrame(e.videoCodec, nil)
+		_, _ = ffmpeg.AVCodecSendFrame(e.videoCodec, nil)
 
 		// Drain remaining packets
 		for {
@@ -1101,7 +1090,7 @@ func (e *Encoder) Close() error {
 			if ret >= 0 {
 				pkt.SetStreamIndex(e.videoStream.Index())
 				ffmpeg.AVPacketRescaleTs(pkt, e.videoCodec.TimeBase(), e.videoStream.TimeBase())
-				ffmpeg.AVInterleavedWriteFrame(e.formatCtx, pkt)
+				_, _ = ffmpeg.AVInterleavedWriteFrame(e.formatCtx, pkt)
 			}
 
 			ffmpeg.AVPacketFree(&pkt)
@@ -1110,7 +1099,7 @@ func (e *Encoder) Close() error {
 
 	// Write trailer
 	if e.formatCtx != nil {
-		ffmpeg.AVWriteTrailer(e.formatCtx)
+		_, _ = ffmpeg.AVWriteTrailer(e.formatCtx)
 
 		// Close output file
 		if e.formatCtx.Pb() != nil {

@@ -2,8 +2,8 @@ package audio
 
 import "io"
 
-// AudioDecoder defines the interface for all audio format decoders
-type AudioDecoder interface {
+// Decoder defines the interface for all audio format decoders
+type Decoder interface {
 	// ReadChunk reads the next chunk of samples as float64
 	// Returns nil when EOF is reached
 	ReadChunk(numSamples int) ([]float64, error)

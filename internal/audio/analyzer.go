@@ -1,6 +1,7 @@
 package audio
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -21,8 +22,8 @@ type FrameAnalysis struct {
 	BarMagnitudes [config.NumBars]float64
 }
 
-// AudioProfile holds complete audio analysis results
-type AudioProfile struct {
+// Profile holds complete audio analysis results.
+type Profile struct {
 	// Total number of frames in audio
 	NumFrames int
 
@@ -46,8 +47,7 @@ type AudioProfile struct {
 type ProgressCallback func(frame, totalFrames int, currentRMS, currentPeak float64, barHeights []float64, duration time.Duration)
 
 // AnalyzeAudio performs Pass 1: stream through audio and collect statistics
-func AnalyzeAudio(filename string, progressCb ProgressCallback) (*AudioProfile, error) {
-
+func AnalyzeAudio(filename string, progressCb ProgressCallback) (*Profile, error) {
 	// Open streaming reader
 	reader, err := NewStreamingReader(filename)
 	if err != nil {
@@ -55,7 +55,7 @@ func AnalyzeAudio(filename string, progressCb ProgressCallback) (*AudioProfile, 
 	}
 	defer reader.Close()
 
-	profile := &AudioProfile{
+	profile := &Profile{
 		NumFrames:  0,                        // Will be set after we count actual samples
 		Frames:     make([]FrameAnalysis, 0), // Will grow as we read
 		SampleRate: reader.SampleRate(),
@@ -81,7 +81,7 @@ func AnalyzeAudio(filename string, progressCb ProgressCallback) (*AudioProfile, 
 	for len(initialSamples) < config.FFTSize {
 		chunk, err := reader.ReadChunk(config.FFTSize - len(initialSamples))
 		if err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				break // Use what we have
 			}
 			return nil, fmt.Errorf("error reading initial chunk: %w", err)
@@ -119,7 +119,7 @@ func AnalyzeAudio(filename string, progressCb ProgressCallback) (*AudioProfile, 
 		if progressCb != nil && frameNum%3 == 0 {
 			// Convert bar magnitudes to slice for progress update
 			barHeights := make([]float64, config.NumBars)
-			for i := 0; i < config.NumBars; i++ {
+			for i := range config.NumBars {
 				barHeights[i] = analysis.BarMagnitudes[i]
 			}
 
@@ -135,13 +135,13 @@ func AnalyzeAudio(filename string, progressCb ProgressCallback) (*AudioProfile, 
 		for len(newSamples) < samplesPerFrame {
 			chunk, err := reader.ReadChunk(samplesPerFrame - len(newSamples))
 			if err != nil {
-				if err == io.EOF {
+				if errors.Is(err, io.EOF) {
 					// If we got some samples, use them; otherwise we're done
 					if len(newSamples) == 0 {
 						// Send final progress update
 						if progressCb != nil {
 							barHeights := make([]float64, config.NumBars)
-							for i := 0; i < config.NumBars; i++ {
+							for i := range config.NumBars {
 								barHeights[i] = analysis.BarMagnitudes[i]
 							}
 							elapsed := time.Since(startTime)
@@ -215,12 +215,10 @@ func analyzeFrame(coeffs []complex128, audioChunk []float64) FrameAnalysis {
 	maxFreqBin := halfSize
 	binsPerBar := maxFreqBin / config.NumBars
 
-	for bar := 0; bar < config.NumBars; bar++ {
+	for bar := range config.NumBars {
 		start := bar * binsPerBar
 		end := start + binsPerBar
-		if end > maxFreqBin {
-			end = maxFreqBin
-		}
+		end = min(end, maxFreqBin)
 
 		var sum float64
 		for i := start; i < end; i++ {

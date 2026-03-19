@@ -72,8 +72,8 @@ func BenchmarkFrameWithText(b *testing.B) {
 func TestFrameRendering(t *testing.T) {
 	bgImage := image.NewRGBA(image.Rect(0, 0, config.Width, config.Height))
 	// Fill with a simple pattern
-	for y := 0; y < config.Height; y++ {
-		for x := 0; x < config.Width; x++ {
+	for y := range config.Height {
+		for x := range config.Width {
 			offset := y*bgImage.Stride + x*4
 			bgImage.Pix[offset] = uint8(x % 256)
 			bgImage.Pix[offset+1] = uint8(y % 256)

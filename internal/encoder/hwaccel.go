@@ -186,11 +186,7 @@ func testEncoderAvailable(encoderName string, deviceType ffmpeg.AVHWDeviceType, 
 
 	// Try to open the encoder - this is the definitive test
 	ret, _ = ffmpeg.AVCodecOpen2(codecCtx, codec, nil)
-	if ret < 0 {
-		return false
-	}
-
-	return true
+	return ret >= 0
 }
 
 // DetectHWEncoders probes for available hardware encoders

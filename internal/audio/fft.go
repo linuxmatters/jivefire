@@ -33,12 +33,10 @@ func BinFFT(coeffs []complex128, sensitivity float64, baseScale float64, result 
 
 	binsPerBar := maxFreqBin / config.NumBars
 
-	for bar := 0; bar < config.NumBars; bar++ {
+	for bar := range config.NumBars {
 		start := bar * binsPerBar
 		end := start + binsPerBar
-		if end > maxFreqBin {
-			end = maxFreqBin
-		}
+		end = min(end, maxFreqBin)
 
 		// Average magnitude in this range
 		var sum float64
@@ -104,7 +102,7 @@ func NewProcessor() *Processor {
 	// Pre-compute Hanning window coefficients once
 	window := make([]float64, config.FFTSize)
 	n := float64(config.FFTSize - 1)
-	for i := 0; i < config.FFTSize; i++ {
+	for i := range config.FFTSize {
 		window[i] = 0.5 * (1 - math.Cos(2*math.Pi*float64(i)/n))
 	}
 	return &Processor{
@@ -125,12 +123,11 @@ func (p *Processor) ProcessChunk(samples []float64) []complex128 {
 	}
 
 	// Apply Hanning window using pre-computed coefficients (faster than trig per sample)
-	for i := 0; i < config.FFTSize; i++ {
+	for i := range config.FFTSize {
 		p.windowedBuffer[i] = chunk[i] * p.hanningWindow[i]
 	}
 
-	// Convert to complex128 for gofft
-	// gofft works in-place, modifying the input array
+	// Convert to complex128 for gofft which works in-place, modifying the input array
 	fftInput := gofft.Float64ToComplex128Array(p.windowedBuffer)
 
 	// Compute FFT in-place

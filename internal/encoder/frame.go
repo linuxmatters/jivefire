@@ -34,7 +34,7 @@ const (
 //
 //go:inline
 func rgbToY(r, g, b int32) uint8 {
-	return uint8((yR*r + yG*g + yB*b + 1<<15) >> 16)
+	return uint8((yR*r + yG*g + yB*b + 1<<15) >> 16) //nolint:gosec // result is clamped to 0-255
 }
 
 // rgbToCb converts RGB to Cb (blue-difference chroma) with branchless clamping.
@@ -42,12 +42,12 @@ func rgbToY(r, g, b int32) uint8 {
 //go:inline
 func rgbToCb(r, g, b int32) uint8 {
 	cb := cbR*r + cbG*g + cbB*b + 257<<15
-	if uint32(cb)&0xff000000 == 0 {
+	if uint32(cb)&0xff000000 == 0 { //nolint:gosec // intentional bit manipulation
 		cb >>= 16
 	} else {
 		cb = ^(cb >> 31)
 	}
-	return uint8(cb)
+	return uint8(cb) //nolint:gosec // value is clamped by branch above
 }
 
 // rgbToCr converts RGB to Cr (red-difference chroma) with branchless clamping.
@@ -55,12 +55,12 @@ func rgbToCb(r, g, b int32) uint8 {
 //go:inline
 func rgbToCr(r, g, b int32) uint8 {
 	cr := crR*r + crG*g + crB*b + 257<<15
-	if uint32(cr)&0xff000000 == 0 {
+	if uint32(cr)&0xff000000 == 0 { //nolint:gosec // intentional bit manipulation
 		cr >>= 16
 	} else {
 		cr = ^(cr >> 31)
 	}
-	return uint8(cr)
+	return uint8(cr) //nolint:gosec // value is clamped by branch above
 }
 
 // parallelRows executes fn across height rows using all CPU cores.
@@ -75,7 +75,7 @@ func parallelRows(height int, fn func(startY, endY int)) {
 	var wg sync.WaitGroup
 	wg.Add(numCPU)
 
-	for worker := 0; worker < numCPU; worker++ {
+	for worker := range numCPU {
 		startY := worker * rowsPerWorker
 		endY := startY + rowsPerWorker
 		if worker == numCPU-1 {
@@ -92,14 +92,14 @@ func parallelRows(height int, fn func(startY, endY int)) {
 }
 
 // convertRGBToYUV converts RGB24 data to YUV420P (planar) format.
-func convertRGBToYUV(rgbData []byte, yuvFrame *ffmpeg.AVFrame, width, height int) error {
+func convertRGBToYUV(rgbData []byte, yuvFrame *ffmpeg.AVFrame, width, height int) {
 	yPlane := yuvFrame.Data().Get(0)
 	uPlane := yuvFrame.Data().Get(1)
 	vPlane := yuvFrame.Data().Get(2)
 
-	yLinesize := int(yuvFrame.Linesize().Get(0))
-	uLinesize := int(yuvFrame.Linesize().Get(1))
-	vLinesize := int(yuvFrame.Linesize().Get(2))
+	yLinesize := yuvFrame.Linesize().Get(0)
+	uLinesize := yuvFrame.Linesize().Get(1)
+	vLinesize := yuvFrame.Linesize().Get(2)
 
 	parallelRows(height, func(startY, endY int) {
 		// Align startY to even for correct UV row calculation
@@ -110,13 +110,13 @@ func convertRGBToYUV(rgbData []byte, yuvFrame *ffmpeg.AVFrame, width, height int
 
 		// Process even rows: Y + UV
 		for y := evenStart; y < endY; y += 2 {
-			yPtr := unsafe.Add(unsafe.Pointer(yPlane), y*yLinesize)
+			yPtr := unsafe.Add(yPlane, y*yLinesize)
 			uvY := y >> 1
-			uRowPtr := unsafe.Add(unsafe.Pointer(uPlane), uvY*uLinesize)
-			vRowPtr := unsafe.Add(unsafe.Pointer(vPlane), uvY*vLinesize)
+			uRowPtr := unsafe.Add(uPlane, uvY*uLinesize)
+			vRowPtr := unsafe.Add(vPlane, uvY*vLinesize)
 			rgbIdx := y * width * 3
 
-			for x := 0; x < width; x++ {
+			for x := range width {
 				r := int32(rgbData[rgbIdx])
 				g := int32(rgbData[rgbIdx+1])
 				b := int32(rgbData[rgbIdx+2])
@@ -139,10 +139,10 @@ func convertRGBToYUV(rgbData []byte, yuvFrame *ffmpeg.AVFrame, width, height int
 			oddStart++
 		}
 		for y := oddStart; y < endY; y += 2 {
-			yPtr := unsafe.Add(unsafe.Pointer(yPlane), y*yLinesize)
+			yPtr := unsafe.Add(yPlane, y*yLinesize)
 			rgbIdx := y * width * 3
 
-			for x := 0; x < width; x++ {
+			for x := range width {
 				r := int32(rgbData[rgbIdx])
 				g := int32(rgbData[rgbIdx+1])
 				b := int32(rgbData[rgbIdx+2])
@@ -152,20 +152,18 @@ func convertRGBToYUV(rgbData []byte, yuvFrame *ffmpeg.AVFrame, width, height int
 			}
 		}
 	})
-
-	return nil
 }
 
 // convertRGBAToYUV converts RGBA data directly to YUV420P (planar) format.
 // Skips the intermediate RGB24 buffer allocation for significantly faster software encoding.
-func convertRGBAToYUV(rgbaData []byte, yuvFrame *ffmpeg.AVFrame, width, height int) error {
+func convertRGBAToYUV(rgbaData []byte, yuvFrame *ffmpeg.AVFrame, width, height int) {
 	yPlane := yuvFrame.Data().Get(0)
 	uPlane := yuvFrame.Data().Get(1)
 	vPlane := yuvFrame.Data().Get(2)
 
-	yLinesize := int(yuvFrame.Linesize().Get(0))
-	uLinesize := int(yuvFrame.Linesize().Get(1))
-	vLinesize := int(yuvFrame.Linesize().Get(2))
+	yLinesize := yuvFrame.Linesize().Get(0)
+	uLinesize := yuvFrame.Linesize().Get(1)
+	vLinesize := yuvFrame.Linesize().Get(2)
 
 	parallelRows(height, func(startY, endY int) {
 		// Align startY to even for correct UV row calculation
@@ -176,13 +174,13 @@ func convertRGBAToYUV(rgbaData []byte, yuvFrame *ffmpeg.AVFrame, width, height i
 
 		// Process even rows: Y + UV
 		for y := evenStart; y < endY; y += 2 {
-			yPtr := unsafe.Add(unsafe.Pointer(yPlane), y*yLinesize)
+			yPtr := unsafe.Add(yPlane, y*yLinesize)
 			uvY := y >> 1
-			uRowPtr := unsafe.Add(unsafe.Pointer(uPlane), uvY*uLinesize)
-			vRowPtr := unsafe.Add(unsafe.Pointer(vPlane), uvY*vLinesize)
+			uRowPtr := unsafe.Add(uPlane, uvY*uLinesize)
+			vRowPtr := unsafe.Add(vPlane, uvY*vLinesize)
 			rgbaIdx := y * width * 4
 
-			for x := 0; x < width; x++ {
+			for x := range width {
 				r := int32(rgbaData[rgbaIdx])
 				g := int32(rgbaData[rgbaIdx+1])
 				b := int32(rgbaData[rgbaIdx+2])
@@ -205,10 +203,10 @@ func convertRGBAToYUV(rgbaData []byte, yuvFrame *ffmpeg.AVFrame, width, height i
 			oddStart++
 		}
 		for y := oddStart; y < endY; y += 2 {
-			yPtr := unsafe.Add(unsafe.Pointer(yPlane), y*yLinesize)
+			yPtr := unsafe.Add(yPlane, y*yLinesize)
 			rgbaIdx := y * width * 4
 
-			for x := 0; x < width; x++ {
+			for x := range width {
 				r := int32(rgbaData[rgbaIdx])
 				g := int32(rgbaData[rgbaIdx+1])
 				b := int32(rgbaData[rgbaIdx+2])
@@ -218,18 +216,16 @@ func convertRGBAToYUV(rgbaData []byte, yuvFrame *ffmpeg.AVFrame, width, height i
 			}
 		}
 	})
-
-	return nil
 }
 
 // convertRGBAToNV12 converts RGBA data to NV12 (semi-planar) format.
 // NV12 has a Y plane followed by interleaved UV plane.
-func convertRGBAToNV12(rgbaData []byte, nv12Frame *ffmpeg.AVFrame, width, height int) error {
+func convertRGBAToNV12(rgbaData []byte, nv12Frame *ffmpeg.AVFrame, width, height int) {
 	yPlane := nv12Frame.Data().Get(0)
 	uvPlane := nv12Frame.Data().Get(1)
 
-	yLinesize := int(nv12Frame.Linesize().Get(0))
-	uvLinesize := int(nv12Frame.Linesize().Get(1))
+	yLinesize := nv12Frame.Linesize().Get(0)
+	uvLinesize := nv12Frame.Linesize().Get(1)
 
 	parallelRows(height, func(startY, endY int) {
 		// Align startY to even for correct UV row calculation
@@ -240,12 +236,12 @@ func convertRGBAToNV12(rgbaData []byte, nv12Frame *ffmpeg.AVFrame, width, height
 
 		// Process even rows: Y + UV
 		for y := evenStart; y < endY; y += 2 {
-			yPtr := unsafe.Add(unsafe.Pointer(yPlane), y*yLinesize)
+			yPtr := unsafe.Add(yPlane, y*yLinesize)
 			uvY := y >> 1
-			uvRowPtr := unsafe.Add(unsafe.Pointer(uvPlane), uvY*uvLinesize)
+			uvRowPtr := unsafe.Add(uvPlane, uvY*uvLinesize)
 			rgbaIdx := y * width * 4
 
-			for x := 0; x < width; x++ {
+			for x := range width {
 				r := int32(rgbaData[rgbaIdx])
 				g := int32(rgbaData[rgbaIdx+1])
 				b := int32(rgbaData[rgbaIdx+2])
@@ -269,10 +265,10 @@ func convertRGBAToNV12(rgbaData []byte, nv12Frame *ffmpeg.AVFrame, width, height
 			oddStart++
 		}
 		for y := oddStart; y < endY; y += 2 {
-			yPtr := unsafe.Add(unsafe.Pointer(yPlane), y*yLinesize)
+			yPtr := unsafe.Add(yPlane, y*yLinesize)
 			rgbaIdx := y * width * 4
 
-			for x := 0; x < width; x++ {
+			for x := range width {
 				r := int32(rgbaData[rgbaIdx])
 				g := int32(rgbaData[rgbaIdx+1])
 				b := int32(rgbaData[rgbaIdx+2])
@@ -282,6 +278,4 @@ func convertRGBAToNV12(rgbaData []byte, nv12Frame *ffmpeg.AVFrame, width, height
 			}
 		}
 	})
-
-	return nil
 }

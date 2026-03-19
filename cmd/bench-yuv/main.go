@@ -36,27 +36,27 @@ const (
 )
 
 func rgbToY(r, g, b int32) uint8 {
-	return uint8((yR*r + yG*g + yB*b + 1<<15) >> 16)
+	return uint8((yR*r + yG*g + yB*b + 1<<15) >> 16) //nolint:gosec // result is clamped to 0-255
 }
 
 func rgbToCb(r, g, b int32) uint8 {
 	cb := cbR*r + cbG*g + cbB*b + 257<<15
-	if uint32(cb)&0xff000000 == 0 {
+	if uint32(cb)&0xff000000 == 0 { //nolint:gosec // intentional bit manipulation
 		cb >>= 16
 	} else {
 		cb = ^(cb >> 31)
 	}
-	return uint8(cb)
+	return uint8(cb) //nolint:gosec // value is clamped by branch above
 }
 
 func rgbToCr(r, g, b int32) uint8 {
 	cr := crR*r + crG*g + crB*b + 257<<15
-	if uint32(cr)&0xff000000 == 0 {
+	if uint32(cr)&0xff000000 == 0 { //nolint:gosec // intentional bit manipulation
 		cr >>= 16
 	} else {
 		cr = ^(cr >> 31)
 	}
-	return uint8(cr)
+	return uint8(cr) //nolint:gosec // value is clamped by branch above
 }
 
 func parallelRows(height int, fn func(startY, endY int)) {
@@ -70,7 +70,7 @@ func parallelRows(height int, fn func(startY, endY int)) {
 	var wg sync.WaitGroup
 	wg.Add(numCPU)
 
-	for worker := 0; worker < numCPU; worker++ {
+	for worker := range numCPU {
 		startY := worker * rowsPerWorker
 		endY := startY + rowsPerWorker
 		if worker == numCPU-1 {
@@ -91,9 +91,9 @@ func convertRGBToYUVGo(rgbData []byte, yuvFrame *ffmpeg.AVFrame, width, height i
 	uPlane := yuvFrame.Data().Get(1)
 	vPlane := yuvFrame.Data().Get(2)
 
-	yLinesize := int(yuvFrame.Linesize().Get(0))
-	uLinesize := int(yuvFrame.Linesize().Get(1))
-	vLinesize := int(yuvFrame.Linesize().Get(2))
+	yLinesize := yuvFrame.Linesize().Get(0)
+	uLinesize := yuvFrame.Linesize().Get(1)
+	vLinesize := yuvFrame.Linesize().Get(2)
 
 	parallelRows(height, func(startY, endY int) {
 		evenStart := startY
@@ -103,13 +103,13 @@ func convertRGBToYUVGo(rgbData []byte, yuvFrame *ffmpeg.AVFrame, width, height i
 
 		// Process even rows: Y + UV
 		for y := evenStart; y < endY; y += 2 {
-			yPtr := unsafe.Add(unsafe.Pointer(yPlane), y*yLinesize)
+			yPtr := unsafe.Add(yPlane, y*yLinesize)
 			uvY := y >> 1
-			uRowPtr := unsafe.Add(unsafe.Pointer(uPlane), uvY*uLinesize)
-			vRowPtr := unsafe.Add(unsafe.Pointer(vPlane), uvY*vLinesize)
+			uRowPtr := unsafe.Add(uPlane, uvY*uLinesize)
+			vRowPtr := unsafe.Add(vPlane, uvY*vLinesize)
 			rgbIdx := y * width * 3
 
-			for x := 0; x < width; x++ {
+			for x := range width {
 				r := int32(rgbData[rgbIdx])
 				g := int32(rgbData[rgbIdx+1])
 				b := int32(rgbData[rgbIdx+2])
@@ -131,10 +131,10 @@ func convertRGBToYUVGo(rgbData []byte, yuvFrame *ffmpeg.AVFrame, width, height i
 			oddStart++
 		}
 		for y := oddStart; y < endY; y += 2 {
-			yPtr := unsafe.Add(unsafe.Pointer(yPlane), y*yLinesize)
+			yPtr := unsafe.Add(yPlane, y*yLinesize)
 			rgbIdx := y * width * 3
 
-			for x := 0; x < width; x++ {
+			for x := range width {
 				r := int32(rgbData[rgbIdx])
 				g := int32(rgbData[rgbIdx+1])
 				b := int32(rgbData[rgbIdx+2])
@@ -151,21 +151,26 @@ func convertSwscale(rgbData []byte, yuvFrame *ffmpeg.AVFrame, swsCtx *ffmpeg.Sws
 	srcLinesize := srcFrame.Linesize().Get(0)
 	srcData := srcFrame.Data().Get(0)
 
-	for y := 0; y < height; y++ {
-		srcOffset := y * int(srcLinesize)
+	for y := range height {
+		srcOffset := y * srcLinesize
 		rgbOffset := y * width * 3
 		for x := 0; x < width*3; x++ {
-			*(*uint8)(unsafe.Add(unsafe.Pointer(srcData), srcOffset+x)) = rgbData[rgbOffset+x]
+			*(*uint8)(unsafe.Add(srcData, srcOffset+x)) = rgbData[rgbOffset+x]
 		}
 	}
 
-	ffmpeg.SwsScaleFrame(swsCtx, yuvFrame, srcFrame)
+	_, _ = ffmpeg.SwsScaleFrame(swsCtx, yuvFrame, srcFrame)
 }
 
 func main() {
 	iterations := flag.Int("iterations", 1000, "number of conversions to perform")
 	impl := flag.String("impl", "go", "implementation: go or swscale")
 	flag.Parse()
+
+	if *impl != "go" && *impl != "swscale" {
+		fmt.Fprintf(os.Stderr, "Unknown implementation: %s (use 'go' or 'swscale')\n", *impl)
+		os.Exit(1)
+	}
 
 	// Create test RGB data
 	rgbSize := width * height * 3
@@ -181,7 +186,7 @@ func main() {
 	yuvFrame.SetWidth(width)
 	yuvFrame.SetHeight(height)
 	yuvFrame.SetFormat(int(ffmpeg.AVPixFmtYuv420P))
-	ffmpeg.AVFrameGetBuffer(yuvFrame, 0)
+	_, _ = ffmpeg.AVFrameGetBuffer(yuvFrame, 0)
 	defer ffmpeg.AVFrameFree(&yuvFrame)
 
 	switch *impl {
@@ -199,21 +204,18 @@ func main() {
 		swsCtx.SetDstH(height)
 		swsCtx.SetDstFormat(int(ffmpeg.AVPixFmtYuv420P))
 		swsCtx.SetFlags(uint(ffmpeg.SwsBilinear))
-		ffmpeg.SwsInitContext(swsCtx, nil, nil)
+		_, _ = ffmpeg.SwsInitContext(swsCtx, nil, nil)
 		defer ffmpeg.SwsFreecontext(swsCtx)
 
 		srcFrame := ffmpeg.AVFrameAlloc()
 		srcFrame.SetWidth(width)
 		srcFrame.SetHeight(height)
 		srcFrame.SetFormat(int(ffmpeg.AVPixFmtRgb24))
-		ffmpeg.AVFrameGetBuffer(srcFrame, 0)
+		_, _ = ffmpeg.AVFrameGetBuffer(srcFrame, 0)
 		defer ffmpeg.AVFrameFree(&srcFrame)
 
 		for i := 0; i < *iterations; i++ {
 			convertSwscale(rgbData, yuvFrame, swsCtx, srcFrame, width, height)
 		}
-	default:
-		fmt.Fprintf(os.Stderr, "Unknown implementation: %s (use 'go' or 'swscale')\n", *impl)
-		os.Exit(1)
 	}
 }

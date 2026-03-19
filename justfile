@@ -241,6 +241,14 @@ test-encoder: build
     ./jivefire --episode="01" --title "Linux Matters: wav (mono)" testdata/LMP0.wav testdata/LMP0-wav.mp4
     ./jivefire --no-preview  --episode="02" --title "Linux Matters: wav (stereo)" testdata/LMP0-stereo.wav testdata/LMP0-wav-stereo.mp4
 
+# Run linters
+lint:
+    @go vet ./...
+    @gocyclo -top 20 -avg -ignore '_test\.go$' .
+    @ineffassign ./...
+    @golangci-lint run
+    @actionlint
+
 # Run tests
 test: _check-submodule
     go test ./...

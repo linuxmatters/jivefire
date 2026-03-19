@@ -66,9 +66,9 @@ func DownsampleFrame(frame *image.RGBA, config PreviewConfig) [][]color.RGBA {
 			// Calculate average RGB values
 			if pixelCount > 0 {
 				preview[row][col] = color.RGBA{
-					R: uint8(sumR / pixelCount),
-					G: uint8(sumG / pixelCount),
-					B: uint8(sumB / pixelCount),
+					R: uint8(sumR / pixelCount), //nolint:gosec // average of uint8 values fits in uint8
+					G: uint8(sumG / pixelCount), //nolint:gosec // average of uint8 values fits in uint8
+					B: uint8(sumB / pixelCount), //nolint:gosec // average of uint8 values fits in uint8
 					A: 255,
 				}
 			}
@@ -131,26 +131,18 @@ func appendInt(buf []byte, n int) []byte {
 	}
 
 	// Handle numbers up to 255 (max RGB value)
-	if n >= 100 {
-		buf = append(buf, byte('0'+n/100))
+	switch {
+	case n >= 100:
+		buf = append(buf, byte('0'+n/100)) //nolint:gosec // n/100 is 1 or 2 for values 0-255
 		n %= 100
 		buf = append(buf, byte('0'+n/10))
 		buf = append(buf, byte('0'+n%10))
-	} else if n >= 10 {
+	case n >= 10:
 		buf = append(buf, byte('0'+n/10))
 		buf = append(buf, byte('0'+n%10))
-	} else {
-		buf = append(buf, byte('0'+n))
+	default:
+		buf = append(buf, byte('0'+n)) //nolint:gosec // n is 0-9 here
 	}
 
 	return buf
-}
-
-// repeat creates a string by repeating s n times
-func repeat(s string, n int) string {
-	result := ""
-	for i := 0; i < n; i++ {
-		result += s
-	}
-	return result
 }
