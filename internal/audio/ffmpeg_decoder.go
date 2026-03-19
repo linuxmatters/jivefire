@@ -31,45 +31,15 @@ func NewFFmpegDecoder(filename string) (*FFmpegDecoder, error) {
 		sampleBuffer: make([]float64, 0, 8192),
 	}
 
-	// Open input file
-	path := ffmpeg.ToCStr(filename)
-	defer path.Free()
-
-	ret, err := ffmpeg.AVFormatOpenInput(&d.formatCtx, path, nil, nil)
+	// Open input file and find audio stream
+	formatCtx, streamIndex, err := openAudioFormatCtx(filename)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open audio file: %w", err)
+		return nil, err
 	}
-	if ret < 0 {
-		return nil, fmt.Errorf("failed to open audio file: error code %d", ret)
-	}
+	d.formatCtx = formatCtx
+	d.streamIndex = streamIndex
 
-	// Find stream info
-	ret, err = ffmpeg.AVFormatFindStreamInfo(d.formatCtx, nil)
-	if err != nil {
-		d.Close()
-		return nil, fmt.Errorf("failed to find stream info: %w", err)
-	}
-	if ret < 0 {
-		d.Close()
-		return nil, fmt.Errorf("failed to find stream info: error code %d", ret)
-	}
-
-	// Find audio stream
-	d.streamIndex = -1
-	streams := d.formatCtx.Streams()
-	for i := uintptr(0); i < uintptr(d.formatCtx.NbStreams()); i++ {
-		stream := streams.Get(i)
-		if stream.Codecpar().CodecType() == ffmpeg.AVMediaTypeAudio {
-			d.streamIndex = int(i)
-			break
-		}
-	}
-	if d.streamIndex == -1 {
-		d.Close()
-		return nil, fmt.Errorf("no audio stream found in file")
-	}
-
-	audioStream := streams.Get(uintptr(d.streamIndex)) //nolint:gosec // stream index is non-negative
+	audioStream := d.formatCtx.Streams().Get(uintptr(d.streamIndex)) //nolint:gosec // stream index is non-negative
 
 	// Find decoder
 	decoder := ffmpeg.AVCodecFindDecoder(audioStream.Codecpar().CodecId())
@@ -86,7 +56,7 @@ func NewFFmpegDecoder(filename string) (*FFmpegDecoder, error) {
 	}
 
 	// Copy codec parameters
-	ret, err = ffmpeg.AVCodecParametersToContext(d.codecCtx, audioStream.Codecpar())
+	ret, err := ffmpeg.AVCodecParametersToContext(d.codecCtx, audioStream.Codecpar())
 	if err != nil {
 		d.Close()
 		return nil, fmt.Errorf("failed to copy codec parameters: %w", err)
