@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/cmplx"
 	"time"
 
 	"github.com/linuxmatters/jivefire/internal/config"
@@ -222,7 +223,7 @@ func analyzeFrame(coeffs []complex128, audioChunk []float64) FrameAnalysis {
 
 		var sum float64
 		for i := start; i < end; i++ {
-			magnitude := math.Sqrt(real(coeffs[i])*real(coeffs[i]) + imag(coeffs[i])*imag(coeffs[i]))
+			magnitude := cmplx.Abs(coeffs[i])
 			sum += magnitude
 		}
 
