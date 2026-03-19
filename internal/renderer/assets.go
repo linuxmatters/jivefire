@@ -21,22 +21,20 @@ import (
 //go:embed assets/Poppins-Bold.ttf
 var embeddedAssets embed.FS
 
+// loadImageData reads image bytes from the filesystem if customPath is set,
+// otherwise from the embedded assets using assetPath.
+func loadImageData(customPath string, assetPath string) ([]byte, error) {
+	if customPath != "" {
+		return os.ReadFile(customPath)
+	}
+	return embeddedAssets.ReadFile(assetPath)
+}
+
 // LoadBackgroundImage loads and scales the background image (from custom path or embedded asset)
 func LoadBackgroundImage(runtimeConfig *config.RuntimeConfig) (*image.RGBA, error) {
 	imagePath := runtimeConfig.GetBackgroundImagePath()
 
-	var data []byte
-	var err error
-
-	// Check if using custom image path or embedded asset
-	if runtimeConfig.BackgroundImagePath != "" {
-		// Load from filesystem
-		data, err = os.ReadFile(imagePath)
-	} else {
-		// Load from embedded assets
-		data, err = embeddedAssets.ReadFile(imagePath)
-	}
-
+	data, err := loadImageData(runtimeConfig.BackgroundImagePath, imagePath)
 	if err != nil {
 		return nil, err
 	}
@@ -78,12 +76,7 @@ func LoadFont(size float64) (font.Face, error) {
 
 // DrawCenterText draws text centered horizontally at the specified Y position
 func DrawCenterText(img *image.RGBA, face font.Face, text string, centerY int, textColor color.RGBA) {
-	// Create a drawer
-	d := &font.Drawer{
-		Dst:  img,
-		Src:  image.NewUniform(textColor),
-		Face: face,
-	}
+	d := newTextDrawer(img, face, textColor)
 
 	// Measure text dimensions
 	bounds, _ := d.BoundString(text)
@@ -102,12 +95,7 @@ func DrawCenterText(img *image.RGBA, face font.Face, text string, centerY int, t
 
 // DrawEpisodeNumber draws the episode number in the top right corner
 func DrawEpisodeNumber(img *image.RGBA, face font.Face, episodeNum string, textColor color.RGBA) {
-	// Create a drawer
-	d := &font.Drawer{
-		Dst:  img,
-		Src:  image.NewUniform(textColor),
-		Face: face,
-	}
+	d := newTextDrawer(img, face, textColor)
 
 	// Measure text dimensions
 	bounds, _ := d.BoundString(episodeNum)

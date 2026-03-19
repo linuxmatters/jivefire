@@ -1,6 +1,7 @@
 package audio
 
 import (
+	"errors"
 	"io"
 	"testing"
 )
@@ -110,7 +111,7 @@ func TestReadNextFramePartialAtEOF(t *testing.T) {
 	// Drain most of the file
 	for {
 		samples, err := ReadNextFrame(reader, 4096)
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
@@ -136,7 +137,7 @@ func TestReadNextFrameImmediateEOF(t *testing.T) {
 	// Drain completely
 	for {
 		_, err := ReadNextFrame(reader, 8192)
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
@@ -146,7 +147,7 @@ func TestReadNextFrameImmediateEOF(t *testing.T) {
 
 	// Now should get immediate EOF
 	samples, err := ReadNextFrame(reader, 1024)
-	if err != io.EOF {
+	if !errors.Is(err, io.EOF) {
 		t.Errorf("Expected io.EOF, got err=%v samples=%d", err, len(samples))
 	}
 	if samples != nil {
