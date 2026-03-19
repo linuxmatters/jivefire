@@ -6,7 +6,7 @@ import (
 
 // StreamingReader provides chunk-based audio reading for multiple formats
 type StreamingReader struct {
-	decoder AudioDecoder
+	decoder Decoder
 }
 
 // NewStreamingReader creates a streaming audio reader for the given file.

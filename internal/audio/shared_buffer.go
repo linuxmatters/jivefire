@@ -81,10 +81,7 @@ func (b *SharedAudioBuffer) ReadForFFT(numSamples int) ([]float64, error) {
 	}
 
 	// Read up to numSamples
-	toRead := numSamples
-	if toRead > available {
-		toRead = available
-	}
+	toRead := min(numSamples, available)
 
 	result := make([]float64, toRead)
 	copy(result, b.samples[b.fftReadPos:b.fftReadPos+toRead])
@@ -107,7 +104,7 @@ func (b *SharedAudioBuffer) ReadForEncoder(numSamples int) ([]float32, error) {
 		// If we have enough samples, return them
 		if available >= numSamples {
 			result := make([]float32, numSamples)
-			for i := 0; i < numSamples; i++ {
+			for i := range numSamples {
 				result[i] = float32(b.samples[b.encoderReadPos+i])
 			}
 			b.encoderReadPos += numSamples
@@ -121,7 +118,7 @@ func (b *SharedAudioBuffer) ReadForEncoder(numSamples int) ([]float32, error) {
 			}
 			// Return remaining samples (partial frame)
 			result := make([]float32, available)
-			for i := 0; i < available; i++ {
+			for i := range available {
 				result[i] = float32(b.samples[b.encoderReadPos+i])
 			}
 			b.encoderReadPos += available
@@ -146,7 +143,7 @@ func (b *SharedAudioBuffer) ReadForEncoderNonBlocking(numSamples int) ([]float32
 	// If we have enough samples, return them
 	if available >= numSamples {
 		result := make([]float32, numSamples)
-		for i := 0; i < numSamples; i++ {
+		for i := range numSamples {
 			result[i] = float32(b.samples[b.encoderReadPos+i])
 		}
 		b.encoderReadPos += numSamples
@@ -156,7 +153,7 @@ func (b *SharedAudioBuffer) ReadForEncoderNonBlocking(numSamples int) ([]float32
 	// Buffer closed - return whatever we have
 	if b.closed && available > 0 {
 		result := make([]float32, available)
-		for i := 0; i < available; i++ {
+		for i := range available {
 			result[i] = float32(b.samples[b.encoderReadPos+i])
 		}
 		b.encoderReadPos += available
@@ -228,10 +225,7 @@ func (b *SharedAudioBuffer) CompactBuffer() {
 	defer b.mu.Unlock()
 
 	// Find the minimum read position (samples consumed by both)
-	minPos := b.fftReadPos
-	if b.encoderReadPos < minPos {
-		minPos = b.encoderReadPos
-	}
+	minPos := min(b.fftReadPos, b.encoderReadPos)
 
 	if minPos == 0 {
 		return // Nothing to compact

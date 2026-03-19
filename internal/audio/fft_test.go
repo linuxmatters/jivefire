@@ -31,7 +31,7 @@ func TestBinFFT_KnownSineWave(t *testing.T) {
 	// Generate 1 second of 440 Hz sine wave at 44.1 kHz
 	numSamples := int(float64(sampleRate) * duration)
 	sine := make([]float64, numSamples)
-	for i := 0; i < numSamples; i++ {
+	for i := range numSamples {
 		t := float64(i) / float64(sampleRate)
 		sine[i] = math.Sin(2 * math.Pi * frequency * t)
 	}
@@ -200,7 +200,7 @@ func TestBinFFT_EnergyDistribution(t *testing.T) {
 
 	// Create a broadband signal (white noise-ish via multiple frequencies)
 	signal := make([]float64, fftSize)
-	for i := 0; i < fftSize; i++ {
+	for i := range fftSize {
 		signal[i] = 0.1 * (math.Sin(2*math.Pi*100*float64(i)/float64(fftSize)) +
 			math.Sin(2*math.Pi*500*float64(i)/float64(fftSize)) +
 			math.Sin(2*math.Pi*1000*float64(i)/float64(fftSize)))
@@ -300,7 +300,7 @@ func TestRearrangeFrequenciesCenterOut_Symmetry(t *testing.T) {
 
 	// Create input with distinct values (0-31 ascending)
 	input := make([]float64, numBars)
-	for i := 0; i < numBars; i++ {
+	for i := range numBars {
 		input[i] = float64(i)
 	}
 
@@ -308,7 +308,7 @@ func TestRearrangeFrequenciesCenterOut_Symmetry(t *testing.T) {
 	RearrangeFrequenciesCenterOut(input, result)
 
 	// Verify perfect symmetry around center
-	for i := 0; i < center; i++ {
+	for i := range center {
 		leftIdx := center - 1 - i
 		rightIdx := center + i
 
@@ -334,7 +334,7 @@ func TestRearrangeFrequenciesCenterOut_ExpectedMapping(t *testing.T) {
 	// Create input representing increasing frequency (bar 0 = lowest, 31 = highest)
 	// After rearrangement: lowest frequencies should be at center, highest at edges
 	input := make([]float64, numBars)
-	for i := 0; i < numBars; i++ {
+	for i := range numBars {
 		input[i] = float64(i)
 	}
 
@@ -395,7 +395,7 @@ func TestRearrangeFrequenciesCenterOut_EdgeCases(t *testing.T) {
 
 			// Verify symmetry for this case
 			center := tc.size / 2
-			for i := 0; i < center; i++ {
+			for i := range center {
 				leftIdx := center - 1 - i
 				rightIdx := center + i
 
@@ -422,7 +422,7 @@ func TestRearrangeFrequenciesCenterOut_SmallInput(t *testing.T) {
 	// Output should be symmetric:
 	//   - Bars 0-1 mirrored from center going left (1 and 2)
 	//   - Bars 2-3 mirrored from center going right (1 and 2)
-	// Expected result: [input[1], input[0], input[0], input[1]] = [2, 1, 1, 2]
+	// Expected values: [input[1], input[0], then input[0], input[1]] = [2, 1, 1, 2]
 
 	expected := []float64{2, 1, 1, 2}
 	for i, v := range result {
@@ -498,7 +498,7 @@ func TestApplyHanning_KnownValues(t *testing.T) {
 				}
 
 				// Verify symmetry around center
-				for i := 0; i < 4; i++ {
+				for i := range 4 {
 					if math.Abs(windowed[i]-windowed[7-i]) > epsilon {
 						t.Errorf("Symmetry violation at i=%d: windowed[%d]=%.10f != windowed[%d]=%.10f",
 							i, i, windowed[i], 7-i, windowed[7-i])
@@ -616,7 +616,7 @@ func BenchmarkHanningPrecomputed(b *testing.B) {
 	// Pre-compute Hanning window (same as NewProcessor)
 	window := make([]float64, 2048)
 	n := float64(2048 - 1)
-	for i := 0; i < 2048; i++ {
+	for i := range 2048 {
 		window[i] = 0.5 * (1 - math.Cos(2*math.Pi*float64(i)/n))
 	}
 	output := make([]float64, 2048)
@@ -631,7 +631,7 @@ func BenchmarkHanningPrecomputed(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		// Just multiply - no trig, no allocation
-		for j := 0; j < 2048; j++ {
+		for j := range 2048 {
 			output[j] = samples[j] * window[j]
 		}
 	}

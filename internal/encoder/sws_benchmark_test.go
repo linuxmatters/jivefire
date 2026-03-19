@@ -40,7 +40,7 @@ const (
 )
 
 // Current Go implementation (copied from encoder/frame.go for comparison)
-func convertRGBToYUVGo(rgbData []byte, yuvFrame *ffmpeg.AVFrame, width, height int) error {
+func convertRGBToYUVGo(rgbData []byte, yuvFrame *ffmpeg.AVFrame, width, height int) {
 	yPlane := yuvFrame.Data().Get(0)
 	uPlane := yuvFrame.Data().Get(1)
 	vPlane := yuvFrame.Data().Get(2)
@@ -71,7 +71,7 @@ func convertRGBToYUVGo(rgbData []byte, yuvFrame *ffmpeg.AVFrame, width, height i
 	var wg sync.WaitGroup
 	wg.Add(numCPU)
 
-	for worker := 0; worker < numCPU; worker++ {
+	for worker := range numCPU {
 		startY := worker * rowsPerWorker
 		endY := startY + rowsPerWorker
 		if worker == numCPU-1 {
@@ -82,18 +82,18 @@ func convertRGBToYUVGo(rgbData []byte, yuvFrame *ffmpeg.AVFrame, width, height i
 			defer wg.Done()
 
 			for y := startY; y < endY; y++ {
-				yOffset := y * int(yLinesize)
-				yPtr := unsafe.Add(unsafe.Pointer(yPlane), yOffset)
+				yOffset := y * yLinesize
+				yPtr := unsafe.Add(yPlane, yOffset)
 				rgbIdx := y * width * 3
 
-				for x := 0; x < width; x++ {
+				for x := range width {
 					r1 := int32(rgbData[rgbIdx])
 					g1 := int32(rgbData[rgbIdx+1])
 					b1 := int32(rgbData[rgbIdx+2])
 					rgbIdx += 3
 
 					yy := (yR*r1 + yG*g1 + yB*b1 + 1<<15) >> 16
-					*(*uint8)(unsafe.Add(yPtr, x)) = uint8(yy)
+					*(*uint8)(unsafe.Add(yPtr, x)) = uint8(yy) //nolint:gosec // result is clamped to 0-255
 
 					if (y&1) == 0 && (x&1) == 0 {
 						cb := cbR*r1 + cbG*g1 + cbB*b1 + 257<<15
@@ -112,11 +112,11 @@ func convertRGBToYUVGo(rgbData []byte, yuvFrame *ffmpeg.AVFrame, width, height i
 
 						uvY := y >> 1
 						uvX := x >> 1
-						uOffset := uvY*int(uLinesize) + uvX
-						vOffset := uvY*int(vLinesize) + uvX
+						uOffset := uvY*uLinesize + uvX
+						vOffset := uvY*vLinesize + uvX
 
-						*(*uint8)(unsafe.Add(unsafe.Pointer(uPlane), uOffset)) = uint8(cb)
-						*(*uint8)(unsafe.Add(unsafe.Pointer(vPlane), vOffset)) = uint8(cr)
+						*(*uint8)(unsafe.Add(uPlane, uOffset)) = uint8(cb) //nolint:gosec // value is clamped
+						*(*uint8)(unsafe.Add(vPlane, vOffset)) = uint8(cr) //nolint:gosec // value is clamped
 					}
 				}
 			}
@@ -124,7 +124,6 @@ func convertRGBToYUVGo(rgbData []byte, yuvFrame *ffmpeg.AVFrame, width, height i
 	}
 
 	wg.Wait()
-	return nil
 }
 
 // SwsConverter wraps FFmpeg's swscale for RGB24 → YUV420P conversion
@@ -185,10 +184,10 @@ func (c *SwsConverter) Convert(rgbData []byte, dstFrame *ffmpeg.AVFrame) error {
 	srcData := c.srcFrame.Data().Get(0)
 
 	for y := 0; y < c.height; y++ {
-		srcOffset := y * int(srcLinesize)
+		srcOffset := y * srcLinesize
 		rgbOffset := y * c.width * 3
 		for x := 0; x < c.width*3; x++ {
-			*(*uint8)(unsafe.Add(unsafe.Pointer(srcData), srcOffset+x)) = rgbData[rgbOffset+x]
+			*(*uint8)(unsafe.Add(srcData, srcOffset+x)) = rgbData[rgbOffset+x]
 		}
 	}
 
@@ -206,9 +205,9 @@ func (c *SwsConverter) Close() {
 	}
 }
 
-func createTestFrames(width, height int) ([]byte, *ffmpeg.AVFrame) {
+func createTestFrames() ([]byte, *ffmpeg.AVFrame) {
 	// Create RGB test data with some pattern
-	rgbSize := width * height * 3
+	rgbSize := benchWidth * benchHeight * 3
 	rgbData := make([]byte, rgbSize)
 	for i := 0; i < rgbSize; i += 3 {
 		rgbData[i] = uint8(i % 256)   // R
@@ -218,10 +217,10 @@ func createTestFrames(width, height int) ([]byte, *ffmpeg.AVFrame) {
 
 	// Allocate YUV frame
 	yuvFrame := ffmpeg.AVFrameAlloc()
-	yuvFrame.SetWidth(width)
-	yuvFrame.SetHeight(height)
+	yuvFrame.SetWidth(benchWidth)
+	yuvFrame.SetHeight(benchHeight)
 	yuvFrame.SetFormat(int(ffmpeg.AVPixFmtYuv420P))
-	ffmpeg.AVFrameGetBuffer(yuvFrame, 0)
+	_, _ = ffmpeg.AVFrameGetBuffer(yuvFrame, 0)
 
 	return rgbData, yuvFrame
 }
@@ -233,7 +232,7 @@ func createTestFrames(width, height int) ([]byte, *ffmpeg.AVFrame) {
 // BenchmarkGoRGBToYUV measures the parallelised Go implementation.
 // This is the production code path used by Jivefire.
 func BenchmarkGoRGBToYUV(b *testing.B) {
-	rgbData, yuvFrame := createTestFrames(benchWidth, benchHeight)
+	rgbData, yuvFrame := createTestFrames()
 	defer ffmpeg.AVFrameFree(&yuvFrame)
 
 	b.ResetTimer()
@@ -245,7 +244,7 @@ func BenchmarkGoRGBToYUV(b *testing.B) {
 // BenchmarkSwscaleRGBToYUV measures FFmpeg's swscale library.
 // Single-threaded but SIMD-optimised.
 func BenchmarkSwscaleRGBToYUV(b *testing.B) {
-	rgbData, yuvFrame := createTestFrames(benchWidth, benchHeight)
+	rgbData, yuvFrame := createTestFrames()
 	defer ffmpeg.AVFrameFree(&yuvFrame)
 
 	converter, err := NewSwsConverter(benchWidth, benchHeight)
@@ -256,7 +255,7 @@ func BenchmarkSwscaleRGBToYUV(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		converter.Convert(rgbData, yuvFrame)
+		_ = converter.Convert(rgbData, yuvFrame)
 	}
 }
 
@@ -278,7 +277,7 @@ func BenchmarkRGBAToYUVDirect(b *testing.B) {
 	yuvFrame.SetWidth(benchWidth)
 	yuvFrame.SetHeight(benchHeight)
 	yuvFrame.SetFormat(int(ffmpeg.AVPixFmtYuv420P))
-	ffmpeg.AVFrameGetBuffer(yuvFrame, 0)
+	_, _ = ffmpeg.AVFrameGetBuffer(yuvFrame, 0)
 	defer ffmpeg.AVFrameFree(&yuvFrame)
 
 	b.ResetTimer()
@@ -308,7 +307,7 @@ func BenchmarkRGBAToYUVViaRGB24(b *testing.B) {
 	yuvFrame.SetWidth(benchWidth)
 	yuvFrame.SetHeight(benchHeight)
 	yuvFrame.SetFormat(int(ffmpeg.AVPixFmtYuv420P))
-	ffmpeg.AVFrameGetBuffer(yuvFrame, 0)
+	_, _ = ffmpeg.AVFrameGetBuffer(yuvFrame, 0)
 	defer ffmpeg.AVFrameFree(&yuvFrame)
 
 	b.ResetTimer()
@@ -349,21 +348,18 @@ func TestRGBAConversionEquivalence(t *testing.T) {
 	yuvDirect.SetWidth(benchWidth)
 	yuvDirect.SetHeight(benchHeight)
 	yuvDirect.SetFormat(int(ffmpeg.AVPixFmtYuv420P))
-	ffmpeg.AVFrameGetBuffer(yuvDirect, 0)
+	_, _ = ffmpeg.AVFrameGetBuffer(yuvDirect, 0)
 	defer ffmpeg.AVFrameFree(&yuvDirect)
 
 	yuvViaRGB := ffmpeg.AVFrameAlloc()
 	yuvViaRGB.SetWidth(benchWidth)
 	yuvViaRGB.SetHeight(benchHeight)
 	yuvViaRGB.SetFormat(int(ffmpeg.AVPixFmtYuv420P))
-	ffmpeg.AVFrameGetBuffer(yuvViaRGB, 0)
+	_, _ = ffmpeg.AVFrameGetBuffer(yuvViaRGB, 0)
 	defer ffmpeg.AVFrameFree(&yuvViaRGB)
 
 	// Convert using direct path
-	err := convertRGBAToYUV(rgbaData, yuvDirect, benchWidth, benchHeight)
-	if err != nil {
-		t.Fatalf("Direct RGBA→YUV conversion failed: %v", err)
-	}
+	convertRGBAToYUV(rgbaData, yuvDirect, benchWidth, benchHeight)
 
 	// Convert using via-RGB24 path
 	rgb24Size := benchWidth * benchHeight * 3
@@ -377,10 +373,7 @@ func TestRGBAConversionEquivalence(t *testing.T) {
 		srcIdx += 4
 		dstIdx += 3
 	}
-	err = convertRGBToYUV(rgb24Data, yuvViaRGB, benchWidth, benchHeight)
-	if err != nil {
-		t.Fatalf("Via-RGB24 conversion failed: %v", err)
-	}
+	convertRGBToYUV(rgb24Data, yuvViaRGB, benchWidth, benchHeight)
 
 	// Compare Y planes (should be identical)
 	yLinesize := yuvDirect.Linesize().Get(0)
@@ -388,11 +381,11 @@ func TestRGBAConversionEquivalence(t *testing.T) {
 	yPlaneViaRGB := yuvViaRGB.Data().Get(0)
 
 	yDiffCount := 0
-	for y := 0; y < benchHeight; y++ {
-		for x := 0; x < benchWidth; x++ {
-			offset := y*int(yLinesize) + x
-			directVal := *(*uint8)(unsafe.Add(unsafe.Pointer(yPlaneDirect), offset))
-			viaRGBVal := *(*uint8)(unsafe.Add(unsafe.Pointer(yPlaneViaRGB), offset))
+	for y := range benchHeight {
+		for x := range benchWidth {
+			offset := y*yLinesize + x
+			directVal := *(*uint8)(unsafe.Add(yPlaneDirect, offset))
+			viaRGBVal := *(*uint8)(unsafe.Add(yPlaneViaRGB, offset))
 			if directVal != viaRGBVal {
 				yDiffCount++
 			}
@@ -405,11 +398,11 @@ func TestRGBAConversionEquivalence(t *testing.T) {
 	uPlaneViaRGB := yuvViaRGB.Data().Get(1)
 
 	uDiffCount := 0
-	for y := 0; y < benchHeight/2; y++ {
-		for x := 0; x < benchWidth/2; x++ {
-			offset := y*int(uLinesize) + x
-			directVal := *(*uint8)(unsafe.Add(unsafe.Pointer(uPlaneDirect), offset))
-			viaRGBVal := *(*uint8)(unsafe.Add(unsafe.Pointer(uPlaneViaRGB), offset))
+	for y := range benchHeight / 2 {
+		for x := range benchWidth / 2 {
+			offset := y*uLinesize + x
+			directVal := *(*uint8)(unsafe.Add(uPlaneDirect, offset))
+			viaRGBVal := *(*uint8)(unsafe.Add(uPlaneViaRGB, offset))
 			if directVal != viaRGBVal {
 				uDiffCount++
 			}
@@ -422,11 +415,11 @@ func TestRGBAConversionEquivalence(t *testing.T) {
 	vPlaneViaRGB := yuvViaRGB.Data().Get(2)
 
 	vDiffCount := 0
-	for y := 0; y < benchHeight/2; y++ {
-		for x := 0; x < benchWidth/2; x++ {
-			offset := y*int(vLinesize) + x
-			directVal := *(*uint8)(unsafe.Add(unsafe.Pointer(vPlaneDirect), offset))
-			viaRGBVal := *(*uint8)(unsafe.Add(unsafe.Pointer(vPlaneViaRGB), offset))
+	for y := range benchHeight / 2 {
+		for x := range benchWidth / 2 {
+			offset := y*vLinesize + x
+			directVal := *(*uint8)(unsafe.Add(vPlaneDirect, offset))
+			viaRGBVal := *(*uint8)(unsafe.Add(vPlaneViaRGB, offset))
 			if directVal != viaRGBVal {
 				vDiffCount++
 			}
@@ -446,17 +439,14 @@ func TestRGBAConversionEquivalence(t *testing.T) {
 // Some pixel differences are expected due to different rounding in coefficient
 // implementations (Go uses integer arithmetic, FFmpeg uses floating-point).
 func TestConversionEquivalence(t *testing.T) {
-	rgbData, yuvFrameGo := createTestFrames(benchWidth, benchHeight)
+	rgbData, yuvFrameGo := createTestFrames()
 	defer ffmpeg.AVFrameFree(&yuvFrameGo)
 
-	_, yuvFrameSws := createTestFrames(benchWidth, benchHeight)
+	_, yuvFrameSws := createTestFrames()
 	defer ffmpeg.AVFrameFree(&yuvFrameSws)
 
 	// Convert with Go implementation
-	err := convertRGBToYUVGo(rgbData, yuvFrameGo, benchWidth, benchHeight)
-	if err != nil {
-		t.Fatalf("Go conversion failed: %v", err)
-	}
+	convertRGBToYUVGo(rgbData, yuvFrameGo, benchWidth, benchHeight)
 
 	// Convert with swscale
 	converter, err := NewSwsConverter(benchWidth, benchHeight)
@@ -477,11 +467,11 @@ func TestConversionEquivalence(t *testing.T) {
 
 	diffCount := 0
 	maxDiff := 0
-	for y := 0; y < benchHeight; y++ {
-		for x := 0; x < benchWidth; x++ {
-			offset := y*int(yLinesize) + x
-			goVal := *(*uint8)(unsafe.Add(unsafe.Pointer(yPlaneGo), offset))
-			swsVal := *(*uint8)(unsafe.Add(unsafe.Pointer(yPlaneSws), offset))
+	for y := range benchHeight {
+		for x := range benchWidth {
+			offset := y*yLinesize + x
+			goVal := *(*uint8)(unsafe.Add(yPlaneGo, offset))
+			swsVal := *(*uint8)(unsafe.Add(yPlaneSws, offset))
 			diff := int(goVal) - int(swsVal)
 			if diff < 0 {
 				diff = -diff
@@ -509,9 +499,7 @@ func TestBenchmarkSummary(t *testing.T) {
 		t.Skip("Skipping summary in short mode")
 	}
 
-	const iterations = 100
-
-	rgbData, yuvFrame := createTestFrames(benchWidth, benchHeight)
+	rgbData, yuvFrame := createTestFrames()
 	defer ffmpeg.AVFrameFree(&yuvFrame)
 
 	// Benchmark Go implementation
@@ -530,7 +518,7 @@ func TestBenchmarkSummary(t *testing.T) {
 
 	swsStart := testing.Benchmark(func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			converter.Convert(rgbData, yuvFrame)
+			_ = converter.Convert(rgbData, yuvFrame)
 		}
 	})
 

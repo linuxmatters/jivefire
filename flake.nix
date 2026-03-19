@@ -23,11 +23,16 @@
           packages =
             with pkgs;
             [
+              actionlint
+              cosign
               curl
               ffmpeg-full
               gnugrep
               gcc
               go_1_26
+              gocyclo
+              golangci-lint
+              ineffassign
               just
               vhs
             ]

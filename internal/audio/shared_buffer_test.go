@@ -1,6 +1,7 @@
 package audio
 
 import (
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -90,12 +91,10 @@ func TestSharedAudioBuffer_EncoderBlocking(t *testing.T) {
 
 	// Start a goroutine that will write samples after a delay
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		time.Sleep(50 * time.Millisecond)
-		buf.Write([]float64{1.0, 2.0, 3.0, 4.0})
-	}()
+		_ = buf.Write([]float64{1.0, 2.0, 3.0, 4.0})
+	})
 
 	// This should block until samples are available
 	start := time.Now()
@@ -119,7 +118,7 @@ func TestSharedAudioBuffer_CloseUnblocksReaders(t *testing.T) {
 	buf := NewSharedAudioBuffer(1024)
 
 	// Write partial data
-	buf.Write([]float64{1.0, 2.0})
+	_ = buf.Write([]float64{1.0, 2.0})
 
 	// Start a goroutine that will close after a delay
 	go func() {
@@ -145,7 +144,7 @@ func TestSharedAudioBuffer_CloseUnblocksReaders(t *testing.T) {
 
 	// Next read should return ErrBufferClosed
 	_, err = buf.ReadForEncoder(1)
-	if err != ErrBufferClosed {
+	if !errors.Is(err, ErrBufferClosed) {
 		t.Errorf("Expected ErrBufferClosed, got %v", err)
 	}
 }
@@ -163,7 +162,7 @@ func TestSharedAudioBuffer_NonBlockingReturnsNil(t *testing.T) {
 	}
 
 	// Write some but not enough
-	buf.Write([]float64{1.0, 2.0})
+	_ = buf.Write([]float64{1.0, 2.0})
 
 	samples, err = buf.ReadForEncoderNonBlocking(10)
 	if err != nil {
@@ -174,7 +173,7 @@ func TestSharedAudioBuffer_NonBlockingReturnsNil(t *testing.T) {
 	}
 
 	// Now write enough
-	buf.Write([]float64{3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0})
+	_ = buf.Write([]float64{3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0})
 
 	samples, err = buf.ReadForEncoderNonBlocking(10)
 	if err != nil {
@@ -193,11 +192,11 @@ func TestSharedAudioBuffer_Compact(t *testing.T) {
 	for i := range samples {
 		samples[i] = float64(i)
 	}
-	buf.Write(samples)
+	_ = buf.Write(samples)
 
 	// Both consumers read 50 samples
-	buf.ReadForFFT(50)
-	buf.ReadForEncoderNonBlocking(50)
+	_, _ = buf.ReadForFFT(50)
+	_, _ = buf.ReadForEncoderNonBlocking(50)
 
 	// Compact should remove the first 50
 	buf.CompactBuffer()
@@ -229,11 +228,11 @@ func TestSharedAudioBuffer_CompactPartial(t *testing.T) {
 	for i := range samples {
 		samples[i] = float64(i)
 	}
-	buf.Write(samples)
+	_ = buf.Write(samples)
 
 	// FFT reads 70, encoder reads 30
-	buf.ReadForFFT(70)
-	buf.ReadForEncoderNonBlocking(30)
+	_, _ = buf.ReadForFFT(70)
+	_, _ = buf.ReadForEncoderNonBlocking(30)
 
 	// Compact should only remove 30 (the minimum)
 	buf.CompactBuffer()
@@ -255,8 +254,8 @@ func TestSharedAudioBuffer_CompactPartial(t *testing.T) {
 func TestSharedAudioBuffer_Reset(t *testing.T) {
 	buf := NewSharedAudioBuffer(1024)
 
-	buf.Write([]float64{1.0, 2.0, 3.0})
-	buf.ReadForFFT(2)
+	_ = buf.Write([]float64{1.0, 2.0, 3.0})
+	_, _ = buf.ReadForFFT(2)
 	buf.Close()
 
 	// Reset
@@ -287,7 +286,7 @@ func TestSharedAudioBuffer_WriteAfterClose(t *testing.T) {
 	buf.Close()
 
 	err := buf.Write([]float64{1.0})
-	if err != ErrBufferClosed {
+	if !errors.Is(err, ErrBufferClosed) {
 		t.Errorf("Write after close should return ErrBufferClosed, got %v", err)
 	}
 }
@@ -301,12 +300,10 @@ func TestSharedAudioBuffer_ConcurrentAccess(t *testing.T) {
 	var wg sync.WaitGroup
 
 	// Writer goroutine
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for i := 0; i < numSamples; i += chunkSize {
 			chunk := make([]float64, chunkSize)
-			for j := 0; j < chunkSize; j++ {
+			for j := range chunkSize {
 				chunk[j] = float64(i + j)
 			}
 			if err := buf.Write(chunk); err != nil {
@@ -315,36 +312,32 @@ func TestSharedAudioBuffer_ConcurrentAccess(t *testing.T) {
 			}
 		}
 		buf.Close()
-	}()
+	})
 
 	// FFT reader goroutine
 	fftTotal := 0
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for {
 			samples, err := buf.ReadForFFT(512)
-			if err == ErrBufferClosed {
+			if errors.Is(err, ErrBufferClosed) {
 				break
 			}
 			fftTotal += len(samples)
 			time.Sleep(time.Microsecond) // Simulate some work
 		}
-	}()
+	})
 
 	// Encoder reader goroutine
 	encTotal := 0
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for {
 			samples, err := buf.ReadForEncoder(1024)
-			if err == ErrBufferClosed {
+			if errors.Is(err, ErrBufferClosed) {
 				break
 			}
 			encTotal += len(samples)
 		}
-	}()
+	})
 
 	wg.Wait()
 

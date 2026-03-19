@@ -84,7 +84,7 @@ func TestAnalyzeFrameStatistics(t *testing.T) {
 		}
 
 		// Check bar magnitudes
-		for bar := 0; bar < config.NumBars; bar++ {
+		for bar := range config.NumBars {
 			if frame.BarMagnitudes[bar] < 0 {
 				t.Errorf("Frame %d, Bar %d: negative magnitude: %.6f", i, bar, frame.BarMagnitudes[bar])
 			}

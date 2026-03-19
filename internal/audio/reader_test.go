@@ -1,6 +1,7 @@
 package audio
 
 import (
+	"errors"
 	"io"
 	"testing"
 )
@@ -13,7 +14,7 @@ func TestNewStreamingReader(t *testing.T) {
 	defer reader.Close()
 
 	// Get metadata to verify file was opened correctly
-	metadata, err := GetAudioMetadata("../../testdata/LMP0.mp3")
+	metadata, err := GetMetadata("../../testdata/LMP0.mp3")
 	if err != nil {
 		t.Fatalf("Failed to get metadata: %v", err)
 	}
@@ -80,7 +81,7 @@ func TestStreamingReaderMultipleChunks(t *testing.T) {
 
 	for {
 		chunk, err := reader.ReadChunk(chunkSize)
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
@@ -115,7 +116,7 @@ func TestStreamingReaderEOF(t *testing.T) {
 	defer reader.Close()
 
 	// Get total sample count via metadata
-	metadata, err := GetAudioMetadata("../../testdata/LMP0.mp3")
+	metadata, err := GetMetadata("../../testdata/LMP0.mp3")
 	if err != nil {
 		t.Fatalf("Failed to get metadata: %v", err)
 	}
@@ -125,7 +126,7 @@ func TestStreamingReaderEOF(t *testing.T) {
 
 	for {
 		_, err := reader.ReadChunk(chunkSize)
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			// Expected EOF
 			break
 		}
@@ -136,7 +137,7 @@ func TestStreamingReaderEOF(t *testing.T) {
 
 	// Try reading again - should get EOF immediately
 	_, err = reader.ReadChunk(chunkSize)
-	if err != io.EOF {
+	if !errors.Is(err, io.EOF) {
 		t.Errorf("Expected EOF on second read past end, got: %v", err)
 	}
 
@@ -174,7 +175,7 @@ func TestStreamingReaderMultipleReads(t *testing.T) {
 	chunkSize := 2048
 	for {
 		chunk, err := reader1.ReadChunk(chunkSize)
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
@@ -194,7 +195,7 @@ func TestStreamingReaderMultipleReads(t *testing.T) {
 	chunkSize2 := 4096
 	for {
 		chunk, err := reader2.ReadChunk(chunkSize2)
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
@@ -210,11 +211,9 @@ func TestStreamingReaderMultipleReads(t *testing.T) {
 
 	// Compare first 100 samples (should be identical)
 	compareCount := 100
-	if len(samples1) < compareCount {
-		compareCount = len(samples1)
-	}
+	compareCount = min(compareCount, len(samples1))
 
-	for i := 0; i < compareCount; i++ {
+	for i := range compareCount {
 		if samples1[i] != samples2[i] {
 			t.Errorf("Sample %d mismatch: pass1=%f, pass2=%f", i, samples1[i], samples2[i])
 		}

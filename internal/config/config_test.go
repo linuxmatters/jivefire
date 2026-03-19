@@ -614,6 +614,4 @@ func TestRuntimeConfig_NilFields(t *testing.T) {
 }
 
 // ptrUint8 is a helper to create pointers to uint8 values for testing.
-func ptrUint8(v uint8) *uint8 {
-	return &v
-}
+func ptrUint8(v uint8) *uint8 { return &v } //nolint:modernize // pointer-to-value helper for tests

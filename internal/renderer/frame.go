@@ -33,7 +33,7 @@ type Frame struct {
 }
 
 var framePool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return image.NewRGBA(image.Rect(0, 0, config.Width, config.Height))
 	},
 }
@@ -54,7 +54,7 @@ func NewFrame(bgImage *image.RGBA, fontFace font.Face, episodeNum int, title str
 	// Pre-compute intensity gradient table (0.5 to 1.0 range for opaque gradient)
 	// This creates a fade from dim at tips to bright at center without alpha blending
 	intensityTable := make([]uint8, maxBarHeight)
-	for i := 0; i < maxBarHeight; i++ {
+	for i := range maxBarHeight {
 		distanceFromCenter := float64(i) / float64(maxBarHeight)
 		intensityFactor := 1.0 - (distanceFromCenter * 0.5) // 0.5 at tips, 1.0 at center
 		intensityTable[i] = uint8(intensityFactor * 255)
@@ -63,7 +63,7 @@ func NewFrame(bgImage *image.RGBA, fontFace font.Face, episodeNum int, title str
 	// Pre-compute bar colors at different intensity levels (0-255)
 	// Colors are fully opaque - RGB values dimmed by intensity, alpha always 255
 	barColorTable := make([][3]uint8, 256)
-	for intensity := 0; intensity < 256; intensity++ {
+	for intensity := range 256 {
 		factor := float64(intensity) / 255.0
 		barColorTable[intensity][0] = uint8(float64(barR) * factor)
 		barColorTable[intensity][1] = uint8(float64(barG) * factor)
@@ -72,7 +72,7 @@ func NewFrame(bgImage *image.RGBA, fontFace font.Face, episodeNum int, title str
 
 	// Pre-render framing line pattern (text color from config)
 	framingLineData := make([]byte, totalWidth*4)
-	for px := 0; px < totalWidth; px++ {
+	for px := range totalWidth {
 		offset := px * 4
 		framingLineData[offset] = textR   // R
 		framingLineData[offset+1] = textG // G
@@ -151,7 +151,7 @@ func (f *Frame) drawBars(barHeights []float64) {
 
 	// Render only left half (bars 0-31), upward only
 	halfBars := config.NumBars / 2
-	for i := 0; i < halfBars; i++ {
+	for i := range halfBars {
 		barHeight := int(barHeights[i])
 		if barHeight <= 0 {
 			continue
@@ -178,7 +178,7 @@ func (f *Frame) drawBars(barHeights []float64) {
 	// 1. Vertical mirror: bars 0-31 upward → bars 0-31 downward
 	// 2. Horizontal mirror: bars 0-31 upward → bars 32-63 upward
 	// 3. Both mirrors: bars 0-31 upward → bars 32-63 downward
-	for i := 0; i < halfBars; i++ {
+	for i := range halfBars {
 		barHeight := int(barHeights[i])
 		if barHeight <= 0 {
 			continue
@@ -218,7 +218,7 @@ func (f *Frame) renderBar(x, yStart, yEnd, barHeight int, pixelPattern []byte) {
 		colors := &f.barColorTable[intensity]
 
 		// Fill pixel pattern once for this scanline
-		for px := 0; px < config.BarWidth; px++ {
+		for px := range config.BarWidth {
 			offset := px * 4
 			pixelPattern[offset] = colors[0]
 			pixelPattern[offset+1] = colors[1]
@@ -239,7 +239,7 @@ func (f *Frame) mirrorBarVertical(x, yStart, yEnd int) {
 	downStart := f.centerY + config.CenterGap/2
 
 	// Copy each scanline from upward bar in reverse order
-	for i := 0; i < upwardHeight; i++ {
+	for i := range upwardHeight {
 		srcY := yEnd - 1 - i  // Read from bottom of upward bar
 		dstY := downStart + i // Write to top of downward bar
 
