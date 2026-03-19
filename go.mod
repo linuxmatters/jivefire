@@ -1,6 +1,6 @@
 module github.com/linuxmatters/jivefire
 
-go 1.24.2
+go 1.26.1
 
 require (
 	github.com/alecthomas/kong v1.14.0

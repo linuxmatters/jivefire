@@ -27,7 +27,7 @@
               ffmpeg-full
               gnugrep
               gcc
-              go
+              go_1_26
               just
               vhs
             ]
