@@ -1,8 +1,6 @@
 package audio
 
 import (
-	"fmt"
-
 	ffmpeg "github.com/linuxmatters/ffmpeg-statigo"
 )
 
@@ -16,43 +14,14 @@ type Metadata struct {
 
 // GetMetadata uses ffmpeg to extract accurate audio file metadata
 func GetMetadata(filename string) (*Metadata, error) {
-	// Open audio file
-	var inputCtx *ffmpeg.AVFormatContext
-	audioPath := ffmpeg.ToCStr(filename)
-	defer audioPath.Free()
-
-	ret, err := ffmpeg.AVFormatOpenInput(&inputCtx, audioPath, nil, nil)
+	// Open audio file and find audio stream
+	inputCtx, audioStreamIdx, err := openAudioFormatCtx(filename)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open audio file: %w", err)
-	}
-	if ret < 0 {
-		return nil, fmt.Errorf("failed to open audio file: %d", ret)
+		return nil, err
 	}
 	defer ffmpeg.AVFormatCloseInput(&inputCtx)
 
-	ret, err = ffmpeg.AVFormatFindStreamInfo(inputCtx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find stream info: %w", err)
-	}
-	if ret < 0 {
-		return nil, fmt.Errorf("failed to find stream info: %d", ret)
-	}
-
-	// Find audio stream
-	audioStreamIdx := -1
-	streams := inputCtx.Streams()
-	for i := uintptr(0); i < uintptr(inputCtx.NbStreams()); i++ {
-		stream := streams.Get(i)
-		if stream.Codecpar().CodecType() == ffmpeg.AVMediaTypeAudio {
-			audioStreamIdx = int(i)
-			break
-		}
-	}
-	if audioStreamIdx == -1 {
-		return nil, fmt.Errorf("no audio stream found in file")
-	}
-
-	audioStream := streams.Get(uintptr(audioStreamIdx))
+	audioStream := inputCtx.Streams().Get(uintptr(audioStreamIdx)) //nolint:gosec // stream index is non-negative
 	codecpar := audioStream.Codecpar()
 
 	// Extract metadata
