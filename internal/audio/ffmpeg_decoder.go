@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"unsafe"
+	"math"
 
 	ffmpeg "github.com/linuxmatters/ffmpeg-statigo"
 )
@@ -270,13 +270,13 @@ func (d *FFmpegDecoder) extractSamples() ([]float64, error) {
 					uint32(leftSlice[i*4+1])<<8 |
 					uint32(leftSlice[i*4+2])<<16 |
 					uint32(leftSlice[i*4+3])<<24
-				leftFloat := *(*float32)(unsafe.Pointer(&leftBits))
+				leftFloat := math.Float32frombits(leftBits)
 
 				rightBits := uint32(rightSlice[i*4]) |
 					uint32(rightSlice[i*4+1])<<8 |
 					uint32(rightSlice[i*4+2])<<16 |
 					uint32(rightSlice[i*4+3])<<24
-				rightFloat := *(*float32)(unsafe.Pointer(&rightBits))
+				rightFloat := math.Float32frombits(rightBits)
 
 				samples[i] = float64(leftFloat+rightFloat) / 2
 			}
@@ -316,7 +316,7 @@ func (d *FFmpegDecoder) extractSamples() ([]float64, error) {
 					uint32(dataSlice[i*4+1])<<8 |
 					uint32(dataSlice[i*4+2])<<16 |
 					uint32(dataSlice[i*4+3])<<24
-				samples[i] = float64(*(*float32)(unsafe.Pointer(&bits)))
+				samples[i] = float64(math.Float32frombits(bits))
 			}
 
 		default:
@@ -381,7 +381,7 @@ func (d *FFmpegDecoder) extractSamples() ([]float64, error) {
 						uint32(dataSlice[i*4+1])<<8 |
 						uint32(dataSlice[i*4+2])<<16 |
 						uint32(dataSlice[i*4+3])<<24
-					samples[i] = float64(*(*float32)(unsafe.Pointer(&bits)))
+					samples[i] = float64(math.Float32frombits(bits))
 				}
 			} else {
 				// Stereo interleaved
@@ -395,8 +395,8 @@ func (d *FFmpegDecoder) extractSamples() ([]float64, error) {
 						uint32(dataSlice[i*8+5])<<8 |
 						uint32(dataSlice[i*8+6])<<16 |
 						uint32(dataSlice[i*8+7])<<24
-					leftFloat := *(*float32)(unsafe.Pointer(&leftBits))
-					rightFloat := *(*float32)(unsafe.Pointer(&rightBits))
+					leftFloat := math.Float32frombits(leftBits)
+					rightFloat := math.Float32frombits(rightBits)
 					samples[i] = float64(leftFloat+rightFloat) / 2
 				}
 			}

@@ -1,8 +1,10 @@
 package encoder
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"unsafe"
 
@@ -1035,7 +1037,7 @@ func writeMonoFloats(frame *ffmpeg.AVFrame, samples []float32) error {
 	for i := range nbSamples {
 		// Write channel - direct float32 byte copy
 		sampleFloat := samples[i]
-		copy(data[i*4:(i+1)*4], (*[4]byte)(unsafe.Pointer(&sampleFloat))[:])
+		binary.LittleEndian.PutUint32(data[i*4:(i+1)*4], math.Float32bits(sampleFloat))
 	}
 
 	return nil
@@ -1061,11 +1063,11 @@ func writeStereoFloats(frame *ffmpeg.AVFrame, samples []float32) error {
 	for i := range nbSamples {
 		// Write left channel - direct float32 byte copy
 		leftFloat := samples[i*2]
-		copy(leftData[i*4:(i+1)*4], (*[4]byte)(unsafe.Pointer(&leftFloat))[:])
+		binary.LittleEndian.PutUint32(leftData[i*4:(i+1)*4], math.Float32bits(leftFloat))
 
 		// Write right channel - direct float32 byte copy
 		rightFloat := samples[i*2+1]
-		copy(rightData[i*4:(i+1)*4], (*[4]byte)(unsafe.Pointer(&rightFloat))[:])
+		binary.LittleEndian.PutUint32(rightData[i*4:(i+1)*4], math.Float32bits(rightFloat))
 	}
 
 	return nil
