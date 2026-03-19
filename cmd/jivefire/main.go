@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"image"
 	"io"
@@ -377,39 +376,27 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 	samplesPerFrame := config.SampleRate / config.FPS
 	fftBuffer := make([]float64, config.FFTSize)
 
-	// Pre-allocate reusable buffers for audio processing (avoid per-frame allocations)
-	newSamples := make([]float64, 0, samplesPerFrame)
+	// Pre-allocate reusable buffer for audio encoding (avoid per-frame allocations)
 	audioSamples := make([]float32, samplesPerFrame)
 
 	// Pre-fill buffer with first chunk
-	// Keep reading until we get the requested number of samples or EOF
-	var initialSamples []float64
-	for len(initialSamples) < config.FFTSize {
-		chunk, err := reader.ReadChunk(config.FFTSize - len(initialSamples))
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				break // Use what we have
-			}
-			cli.PrintError(fmt.Sprintf("error reading initial audio chunk: %v", err))
-			p.Quit()
-			return
-		}
-		initialSamples = append(initialSamples, chunk...)
+	n, err := audio.FillFFTBuffer(reader, fftBuffer)
+	if err != nil {
+		cli.PrintError(fmt.Sprintf("error reading initial audio chunk: %v", err))
+		p.Quit()
+		return
 	}
-
-	if len(initialSamples) == 0 {
+	if n == 0 {
 		cli.PrintError("no audio data available")
 		p.Quit()
 		return
 	}
 
-	copy(fftBuffer, initialSamples)
-
 	// Write initial audio samples to encoder (first samplesPerFrame worth)
 	// This corresponds to the audio for frame 0
 	initialAudioSamples := make([]float32, samplesPerFrame)
-	for i := 0; i < samplesPerFrame && i < len(initialSamples); i++ {
-		initialAudioSamples[i] = float32(initialSamples[i])
+	for i := 0; i < samplesPerFrame && i < n; i++ {
+		initialAudioSamples[i] = float32(fftBuffer[i])
 	}
 	if err := enc.WriteAudioSamples(initialAudioSamples); err != nil {
 		cli.PrintError(fmt.Sprintf("error writing initial audio: %v", err))
@@ -556,31 +543,15 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 		// === AUDIO TIMING START ===
 		// Read audio, encode, and manage buffer for next frame
 		t0 = time.Now()
-		newSamples = newSamples[:0] // Reset slice, reuse backing array
-		for len(newSamples) < samplesPerFrame {
-			chunk, err := reader.ReadChunk(samplesPerFrame - len(newSamples))
-			if err != nil {
-				if errors.Is(err, io.EOF) {
-					// If we got no new samples at all, we're done
-					if len(newSamples) == 0 {
-						// Break out of the frame loop - no more audio
-						frameNum = numFrames
-						break
-					}
-					// Got partial frame at end of file, use what we have
-					break
-				}
-				cli.PrintError(fmt.Sprintf("error reading audio: %v", err))
-				p.Quit()
-				return
+		newSamples, readErr := audio.ReadNextFrame(reader, samplesPerFrame)
+		if readErr != nil {
+			if readErr == io.EOF {
+				totalAudio += time.Since(t0)
+				break
 			}
-			newSamples = append(newSamples, chunk...)
-		}
-
-		// If we got no new samples, we're done
-		if len(newSamples) == 0 {
-			totalAudio += time.Since(t0)
-			break
+			cli.PrintError(fmt.Sprintf("error reading audio: %v", readErr))
+			p.Quit()
+			return
 		}
 
 		// Write audio samples for this frame to encoder

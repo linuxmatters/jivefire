@@ -1,7 +1,6 @@
 package audio
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -77,24 +76,13 @@ func AnalyzeAudio(filename string, progressCb ProgressCallback) (*Profile, error
 	fftBuffer := make([]float64, config.FFTSize)
 
 	// Pre-fill buffer with first chunk
-	// Keep reading until we get the requested number of samples or EOF
-	var initialSamples []float64
-	for len(initialSamples) < config.FFTSize {
-		chunk, err := reader.ReadChunk(config.FFTSize - len(initialSamples))
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				break // Use what we have
-			}
-			return nil, fmt.Errorf("error reading initial chunk: %w", err)
-		}
-		initialSamples = append(initialSamples, chunk...)
+	n, err := FillFFTBuffer(reader, fftBuffer)
+	if err != nil {
+		return nil, fmt.Errorf("error reading initial chunk: %w", err)
 	}
-
-	if len(initialSamples) == 0 {
+	if n == 0 {
 		return nil, fmt.Errorf("no audio data in file")
 	}
-
-	copy(fftBuffer, initialSamples)
 
 	startTime := time.Now()
 	frameNum := 0
@@ -130,37 +118,21 @@ func AnalyzeAudio(filename string, progressCb ProgressCallback) (*Profile, error
 		}
 
 		// Advance sliding buffer for next frame
-		// Read samplesPerFrame new samples and shift buffer
-		// Keep reading until we get the requested number of samples or EOF
-		newSamples := make([]float64, 0, samplesPerFrame)
-		for len(newSamples) < samplesPerFrame {
-			chunk, err := reader.ReadChunk(samplesPerFrame - len(newSamples))
-			if err != nil {
-				if errors.Is(err, io.EOF) {
-					// If we got some samples, use them; otherwise we're done
-					if len(newSamples) == 0 {
-						// Send final progress update
-						if progressCb != nil {
-							barHeights := make([]float64, config.NumBars)
-							for i := range config.NumBars {
-								barHeights[i] = analysis.BarMagnitudes[i]
-							}
-							elapsed := time.Since(startTime)
-							progressCb(frameNum, frameNum, analysis.RMSLevel, analysis.PeakMagnitude, barHeights, elapsed)
-						}
-						break // Finished reading all audio
+		newSamples, err := ReadNextFrame(reader, samplesPerFrame)
+		if err != nil {
+			if err == io.EOF {
+				// Send final progress update
+				if progressCb != nil {
+					barHeights := make([]float64, config.NumBars)
+					for i := range config.NumBars {
+						barHeights[i] = analysis.BarMagnitudes[i]
 					}
-					// Got partial frame at end of file, use what we have
-					break
+					elapsed := time.Since(startTime)
+					progressCb(frameNum, frameNum, analysis.RMSLevel, analysis.PeakMagnitude, barHeights, elapsed)
 				}
-				return nil, fmt.Errorf("error reading audio at frame %d: %w", frameNum, err)
+				break
 			}
-			newSamples = append(newSamples, chunk...)
-		}
-
-		// If we got no new samples, we're done
-		if len(newSamples) == 0 {
-			break
+			return nil, fmt.Errorf("error reading audio at frame %d: %w", frameNum, err)
 		}
 
 		// Shift buffer left by samplesPerFrame, append new samples
