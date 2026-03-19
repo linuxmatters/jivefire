@@ -2,6 +2,7 @@ package audio
 
 import (
 	"math"
+	"math/cmplx"
 
 	"github.com/argusdusty/gofft"
 	"github.com/linuxmatters/jivefire/internal/config"
@@ -41,7 +42,7 @@ func BinFFT(coeffs []complex128, sensitivity float64, baseScale float64, result 
 		// Average magnitude in this range
 		var sum float64
 		for i := start; i < end; i++ {
-			magnitude := math.Sqrt(real(coeffs[i])*real(coeffs[i]) + imag(coeffs[i])*imag(coeffs[i]))
+			magnitude := cmplx.Abs(coeffs[i])
 			sum += magnitude
 		}
 
