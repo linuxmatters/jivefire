@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"image"
 	"io"
@@ -545,7 +546,7 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 		t0 = time.Now()
 		newSamples, readErr := audio.ReadNextFrame(reader, samplesPerFrame)
 		if readErr != nil {
-			if readErr == io.EOF {
+			if errors.Is(readErr, io.EOF) {
 				totalAudio += time.Since(t0)
 				break
 			}

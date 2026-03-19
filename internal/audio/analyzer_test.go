@@ -7,11 +7,17 @@ import (
 	"github.com/linuxmatters/jivefire/internal/config"
 )
 
-func TestAnalyzeAudio(t *testing.T) {
+func mustAnalyze(t *testing.T) *Profile {
+	t.Helper()
 	profile, err := AnalyzeAudio("../../testdata/LMP0.mp3", nil)
 	if err != nil {
-		t.Fatalf("Failed to analyze audio: %v", err)
+		t.Fatalf("Failed to analyse audio: %v", err)
 	}
+	return profile
+}
+
+func TestAnalyzeAudio(t *testing.T) {
+	profile := mustAnalyze(t)
 
 	// Validate basic properties
 	if profile.NumFrames <= 0 {
@@ -66,10 +72,7 @@ func TestAnalyzeAudioInvalidFile(t *testing.T) {
 }
 
 func TestAnalyzeFrameStatistics(t *testing.T) {
-	profile, err := AnalyzeAudio("../../testdata/LMP0.mp3", nil)
-	if err != nil {
-		t.Fatalf("Failed to analyze audio: %v", err)
-	}
+	profile := mustAnalyze(t)
 
 	// Check first few frames have valid statistics
 	for i := 0; i < 10 && i < len(profile.Frames); i++ {
@@ -95,10 +98,7 @@ func TestAnalyzeFrameStatistics(t *testing.T) {
 }
 
 func TestOptimalBaseScaleCalculation(t *testing.T) {
-	profile, err := AnalyzeAudio("../../testdata/LMP0.mp3", nil)
-	if err != nil {
-		t.Fatalf("Failed to analyze audio: %v", err)
-	}
+	profile := mustAnalyze(t)
 
 	// Optimal baseScale should be calculated as: 0.85 / GlobalPeak
 	expectedBaseScale := 0.85 / profile.GlobalPeak
@@ -120,10 +120,7 @@ func TestOptimalBaseScaleCalculation(t *testing.T) {
 }
 
 func TestGlobalPeakIsMaximum(t *testing.T) {
-	profile, err := AnalyzeAudio("../../testdata/LMP0.mp3", nil)
-	if err != nil {
-		t.Fatalf("Failed to analyze audio: %v", err)
-	}
+	profile := mustAnalyze(t)
 
 	// GlobalPeak should be >= all frame peaks
 	for i, frame := range profile.Frames {
@@ -152,10 +149,7 @@ func TestGlobalPeakIsMaximum(t *testing.T) {
 }
 
 func TestGlobalRMSIsAverage(t *testing.T) {
-	profile, err := AnalyzeAudio("../../testdata/LMP0.mp3", nil)
-	if err != nil {
-		t.Fatalf("Failed to analyze audio: %v", err)
-	}
+	profile := mustAnalyze(t)
 
 	// Calculate average RMS manually
 	var sumRMS float64
@@ -175,10 +169,7 @@ func TestGlobalRMSIsAverage(t *testing.T) {
 }
 
 func TestDynamicRangeCalculation(t *testing.T) {
-	profile, err := AnalyzeAudio("../../testdata/LMP0.mp3", nil)
-	if err != nil {
-		t.Fatalf("Failed to analyze audio: %v", err)
-	}
+	profile := mustAnalyze(t)
 
 	expectedDynamicRange := profile.GlobalPeak / profile.GlobalRMS
 
