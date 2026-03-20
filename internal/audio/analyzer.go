@@ -75,6 +75,7 @@ func AnalyzeAudio(filename string, progressCb ProgressCallback) (*Profile, error
 
 	// Sliding buffer for FFT: we advance by samplesPerFrame but need FFTSize for FFT
 	fftBuffer := make([]float64, config.FFTSize)
+	frameBuf := make([]float64, samplesPerFrame)
 
 	// Pre-fill buffer with first chunk
 	n, err := FillFFTBuffer(reader, fftBuffer)
@@ -119,7 +120,7 @@ func AnalyzeAudio(filename string, progressCb ProgressCallback) (*Profile, error
 		}
 
 		// Advance sliding buffer for next frame
-		newSamples, err := ReadNextFrame(reader, samplesPerFrame)
+		nRead, err := ReadNextFrame(reader, frameBuf)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				// Send final progress update
@@ -138,7 +139,7 @@ func AnalyzeAudio(filename string, progressCb ProgressCallback) (*Profile, error
 
 		// Shift buffer left by samplesPerFrame, append new samples
 		copy(fftBuffer, fftBuffer[samplesPerFrame:])
-		copy(fftBuffer[config.FFTSize-samplesPerFrame:], newSamples)
+		copy(fftBuffer[config.FFTSize-samplesPerFrame:], frameBuf[:nRead])
 	}
 
 	// Set actual frame count and duration
