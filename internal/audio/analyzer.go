@@ -140,6 +140,9 @@ func AnalyzeAudio(filename string, progressCb ProgressCallback) (*Profile, error
 		// Shift buffer left by samplesPerFrame, append new samples
 		copy(fftBuffer, fftBuffer[samplesPerFrame:])
 		copy(fftBuffer[config.FFTSize-samplesPerFrame:], frameBuf[:nRead])
+		if nRead < samplesPerFrame {
+			clear(fftBuffer[config.FFTSize-samplesPerFrame+nRead:])
+		}
 	}
 
 	// Set actual frame count and duration
