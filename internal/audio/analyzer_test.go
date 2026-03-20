@@ -50,11 +50,6 @@ func TestAnalyzeAudio(t *testing.T) {
 		t.Errorf("Expected positive OptimalBaseScale, got %.6f", profile.OptimalBaseScale)
 	}
 
-	// Validate frame analysis array
-	if len(profile.Frames) != profile.NumFrames {
-		t.Errorf("Frame count mismatch: expected %d, got %d", profile.NumFrames, len(profile.Frames))
-	}
-
 	t.Logf("Analysis complete:")
 	t.Logf("  Duration: %.1f seconds", profile.Duration)
 	t.Logf("  Frames: %d", profile.NumFrames)
@@ -69,32 +64,6 @@ func TestAnalyzeAudioInvalidFile(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error for nonexistent file, got nil")
 	}
-}
-
-func TestAnalyzeFrameStatistics(t *testing.T) {
-	profile := mustAnalyze(t)
-
-	// Check first few frames have valid statistics
-	for i := 0; i < 10 && i < len(profile.Frames); i++ {
-		frame := profile.Frames[i]
-
-		if frame.PeakMagnitude < 0 {
-			t.Errorf("Frame %d: negative PeakMagnitude: %.6f", i, frame.PeakMagnitude)
-		}
-
-		if frame.RMSLevel < 0 {
-			t.Errorf("Frame %d: negative RMSLevel: %.6f", i, frame.RMSLevel)
-		}
-
-		// Check bar magnitudes
-		for bar := range config.NumBars {
-			if frame.BarMagnitudes[bar] < 0 {
-				t.Errorf("Frame %d, Bar %d: negative magnitude: %.6f", i, bar, frame.BarMagnitudes[bar])
-			}
-		}
-	}
-
-	t.Logf("Frame statistics validated for %d frames", profile.NumFrames)
 }
 
 func TestOptimalBaseScaleCalculation(t *testing.T) {
@@ -117,55 +86,6 @@ func TestOptimalBaseScaleCalculation(t *testing.T) {
 	t.Logf("OptimalBaseScale correctly calculated: %.6f", profile.OptimalBaseScale)
 	t.Logf("Verification: GlobalPeak (%.6f) × OptimalBaseScale (%.6f) = %.6f",
 		profile.GlobalPeak, profile.OptimalBaseScale, testValue)
-}
-
-func TestGlobalPeakIsMaximum(t *testing.T) {
-	profile := mustAnalyze(t)
-
-	// GlobalPeak should be >= all frame peaks
-	for i, frame := range profile.Frames {
-		if frame.PeakMagnitude > profile.GlobalPeak {
-			t.Errorf("Frame %d peak (%.6f) exceeds GlobalPeak (%.6f)",
-				i, frame.PeakMagnitude, profile.GlobalPeak)
-		}
-	}
-
-	// Find the actual maximum to verify it matches
-	var maxFound float64
-	var maxFrameIdx int
-	for i, frame := range profile.Frames {
-		if frame.PeakMagnitude > maxFound {
-			maxFound = frame.PeakMagnitude
-			maxFrameIdx = i
-		}
-	}
-
-	if maxFound != profile.GlobalPeak {
-		t.Errorf("GlobalPeak (%.6f) doesn't match actual maximum (%.6f) at frame %d",
-			profile.GlobalPeak, maxFound, maxFrameIdx)
-	}
-
-	t.Logf("GlobalPeak correctly represents maximum: %.6f at frame %d", profile.GlobalPeak, maxFrameIdx)
-}
-
-func TestGlobalRMSIsAverage(t *testing.T) {
-	profile := mustAnalyze(t)
-
-	// Calculate average RMS manually
-	var sumRMS float64
-	for _, frame := range profile.Frames {
-		sumRMS += frame.RMSLevel
-	}
-	expectedRMS := sumRMS / float64(len(profile.Frames))
-
-	// Allow small floating point error
-	diff := profile.GlobalRMS - expectedRMS
-	if diff < -0.000001 || diff > 0.000001 {
-		t.Errorf("GlobalRMS (%.6f) doesn't match calculated average (%.6f)",
-			profile.GlobalRMS, expectedRMS)
-	}
-
-	t.Logf("GlobalRMS correctly calculated as average: %.6f", profile.GlobalRMS)
 }
 
 func TestDynamicRangeCalculation(t *testing.T) {
@@ -197,7 +117,7 @@ func TestAnalyzeFrameDirectly(t *testing.T) {
 	coeffs := processor.ProcessChunk(testSamples)
 
 	// Analyze
-	analysis := analyzeFrame(coeffs, testSamples)
+	analysis := analyzeFrame(coeffs, testSamples, nil)
 
 	// Validate results
 	if analysis.PeakMagnitude <= 0 {

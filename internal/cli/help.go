@@ -6,35 +6,36 @@ import (
 
 	"github.com/alecthomas/kong"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/linuxmatters/jivefire/internal/theme"
 )
 
 // Custom help styles - fire theme
 var (
 	helpTitleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(FireYellow).
+			Foreground(theme.FireYellow).
 			MarginBottom(1)
 
 	helpDescStyle = lipgloss.NewStyle().
-			Foreground(FireOrange).
+			Foreground(theme.FireOrange).
 			Italic(true).
 			MarginBottom(1)
 
 	helpSectionStyle = lipgloss.NewStyle().
 				Bold(true).
-				Foreground(FireOrange).
+				Foreground(theme.FireOrange).
 				MarginTop(1)
 
 	helpFlagStyle = lipgloss.NewStyle().
-			Foreground(FireYellow).
+			Foreground(theme.FireYellow).
 			Bold(true)
 
 	helpArgStyle = lipgloss.NewStyle().
-			Foreground(FireRed).
+			Foreground(theme.FireRed).
 			Bold(true)
 
 	helpDefaultStyle = lipgloss.NewStyle().
-				Foreground(WarmGray).
+				Foreground(theme.WarmGray).
 				Italic(true)
 )
 

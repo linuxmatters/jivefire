@@ -43,6 +43,7 @@
 ## Performance Patterns
 
 - RGB→YUV conversion in `encoder/frame.go` parallelised across CPU cores (8.4× faster than swscale)
+- `convertRGBAToYUV` (YUV420P) and `convertRGBAToNV12` (NV12) are intentionally kept as separate functions despite near-identical structure — the hot-path duplication avoids a callback/interface indirection that would hurt throughput; do not refactor into a shared helper
 - Frame rendering uses symmetric mirroring (draw 1/4 pixels, mirror 3×)
 - Pre-computed intensity/colour tables in `renderer/frame.go`
 - Bubbletea UI uses non-blocking goroutine channels
