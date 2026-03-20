@@ -92,12 +92,13 @@ func TestReadNextFrameNormal(t *testing.T) {
 	}
 	defer reader.Close()
 
-	samples, err := ReadNextFrame(reader, 1024)
+	buf := make([]float64, 1024)
+	n, err := ReadNextFrame(reader, buf)
 	if err != nil {
 		t.Fatalf("ReadNextFrame returned error: %v", err)
 	}
-	if len(samples) != 1024 {
-		t.Errorf("Expected 1024 samples, got %d", len(samples))
+	if n != 1024 {
+		t.Errorf("Expected 1024 samples, got %d", n)
 	}
 }
 
@@ -108,22 +109,29 @@ func TestReadNextFramePartialAtEOF(t *testing.T) {
 	}
 	defer reader.Close()
 
-	// Drain most of the file
+	// Drain most of the file, tracking whether we saw a partial frame
+	buf := make([]float64, 4096)
+	sawPartial := false
 	for {
-		samples, err := ReadNextFrame(reader, 4096)
+		n, err := ReadNextFrame(reader, buf)
 		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
-		if len(samples) < 4096 {
-			// Got a partial frame at EOF - this is the expected partial case
-			if len(samples) == 0 {
+		if n < len(buf) {
+			// Got a partial frame at EOF
+			if n == 0 {
 				t.Error("Expected partial samples, got 0")
 			}
+			sawPartial = true
 			break
 		}
+	}
+
+	if !sawPartial {
+		t.Error("Expected to observe a partial frame before EOF, but none was returned")
 	}
 }
 
@@ -135,8 +143,9 @@ func TestReadNextFrameImmediateEOF(t *testing.T) {
 	defer reader.Close()
 
 	// Drain completely
+	buf := make([]float64, 8192)
 	for {
-		_, err := ReadNextFrame(reader, 8192)
+		_, err := ReadNextFrame(reader, buf)
 		if errors.Is(err, io.EOF) {
 			break
 		}
@@ -146,11 +155,12 @@ func TestReadNextFrameImmediateEOF(t *testing.T) {
 	}
 
 	// Now should get immediate EOF
-	samples, err := ReadNextFrame(reader, 1024)
+	smallBuf := make([]float64, 1024)
+	n, err := ReadNextFrame(reader, smallBuf)
 	if !errors.Is(err, io.EOF) {
-		t.Errorf("Expected io.EOF, got err=%v samples=%d", err, len(samples))
+		t.Errorf("Expected io.EOF, got err=%v n=%d", err, n)
 	}
-	if samples != nil {
-		t.Errorf("Expected nil samples on EOF, got %d", len(samples))
+	if n != 0 {
+		t.Errorf("Expected 0 samples on EOF, got %d", n)
 	}
 }

@@ -377,7 +377,8 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 	samplesPerFrame := config.SampleRate / config.FPS
 	fftBuffer := make([]float64, config.FFTSize)
 
-	// Pre-allocate reusable buffer for audio encoding (avoid per-frame allocations)
+	// Pre-allocate reusable buffers for audio processing (avoid per-frame allocations)
+	newSamples := make([]float64, samplesPerFrame)
 	audioSamples := make([]float32, samplesPerFrame)
 
 	// Pre-fill buffer with first chunk
@@ -544,7 +545,7 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 		// === AUDIO TIMING START ===
 		// Read audio, encode, and manage buffer for next frame
 		t0 = time.Now()
-		newSamples, readErr := audio.ReadNextFrame(reader, samplesPerFrame)
+		nRead, readErr := audio.ReadNextFrame(reader, newSamples)
 		if readErr != nil {
 			if errors.Is(readErr, io.EOF) {
 				totalAudio += time.Since(t0)
@@ -558,10 +559,10 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 		// Write audio samples for this frame to encoder
 		// Convert float64 samples to float32 for AAC encoder
 		// Uses pre-allocated audioSamples buffer, slice to actual length
-		for i, s := range newSamples {
-			audioSamples[i] = float32(s)
+		for i := range nRead {
+			audioSamples[i] = float32(newSamples[i])
 		}
-		if err := enc.WriteAudioSamples(audioSamples[:len(newSamples)]); err != nil {
+		if err := enc.WriteAudioSamples(audioSamples[:nRead]); err != nil {
 			cli.PrintError(fmt.Sprintf("error writing audio at frame %d: %v", frameNum, err))
 			p.Quit()
 			return
@@ -569,14 +570,14 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 		// Shift buffer left by samplesPerFrame, append new samples
 		copy(fftBuffer, fftBuffer[samplesPerFrame:])
 		// Pad with zeros if we got fewer samples than expected
-		if len(newSamples) < samplesPerFrame {
-			copy(fftBuffer[config.FFTSize-samplesPerFrame:], newSamples)
+		if nRead < samplesPerFrame {
+			copy(fftBuffer[config.FFTSize-samplesPerFrame:], newSamples[:nRead])
 			// Zero-fill the remaining space
-			for i := config.FFTSize - samplesPerFrame + len(newSamples); i < config.FFTSize; i++ {
+			for i := config.FFTSize - samplesPerFrame + nRead; i < config.FFTSize; i++ {
 				fftBuffer[i] = 0
 			}
 		} else {
-			copy(fftBuffer[config.FFTSize-samplesPerFrame:], newSamples)
+			copy(fftBuffer[config.FFTSize-samplesPerFrame:], newSamples[:nRead])
 		}
 		totalAudio += time.Since(t0)
 		// === AUDIO TIMING END ===
