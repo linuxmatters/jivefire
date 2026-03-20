@@ -1,9 +1,9 @@
-package cli
+package theme
 
 import "github.com/charmbracelet/lipgloss"
 
-// Fire colour palette 🔥
-// Shared fire theme colours for consistent branding across CLI and TUI
+// Fire colour palette
+// Shared fire theme colours for consistent branding across CLI and TUI.
 var (
 	// Core fire colours (dark to bright)
 	FireYellow  = lipgloss.Color("#FFD700") // Bright yellow

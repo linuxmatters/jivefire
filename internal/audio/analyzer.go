@@ -18,18 +18,12 @@ type FrameAnalysis struct {
 
 	// RMS level of audio chunk
 	RMSLevel float64
-
-	// Average per-bar magnitudes (for future use)
-	BarMagnitudes [config.NumBars]float64
 }
 
 // Profile holds complete audio analysis results.
 type Profile struct {
 	// Total number of frames in audio
 	NumFrames int
-
-	// Per-frame analysis data
-	Frames []FrameAnalysis
 
 	// Global statistics
 	GlobalPeak   float64 // Highest peak magnitude across all frames
@@ -57,8 +51,7 @@ func AnalyzeAudio(filename string, progressCb ProgressCallback) (*Profile, error
 	defer reader.Close()
 
 	profile := &Profile{
-		NumFrames:  0,                        // Will be set after we count actual samples
-		Frames:     make([]FrameAnalysis, 0), // Will grow as we read
+		NumFrames:  0, // Will be set after we count actual samples
 		SampleRate: reader.SampleRate(),
 		Duration:   0, // Will be calculated from actual sample count
 	}
@@ -86,6 +79,9 @@ func AnalyzeAudio(filename string, progressCb ProgressCallback) (*Profile, error
 		return nil, fmt.Errorf("no audio data in file")
 	}
 
+	// Pre-allocate bar magnitudes buffer for progress callbacks
+	barHeights := make([]float64, config.NumBars)
+
 	startTime := time.Now()
 	frameNum := 0
 
@@ -95,8 +91,7 @@ func AnalyzeAudio(filename string, progressCb ProgressCallback) (*Profile, error
 		coeffs := processor.ProcessChunk(fftBuffer)
 
 		// Analyze frequency bins
-		analysis := analyzeFrame(coeffs, fftBuffer)
-		profile.Frames = append(profile.Frames, analysis)
+		analysis := analyzeFrame(coeffs, fftBuffer, barHeights)
 
 		// Track global statistics
 		if analysis.PeakMagnitude > maxPeak {
@@ -108,12 +103,6 @@ func AnalyzeAudio(filename string, progressCb ProgressCallback) (*Profile, error
 
 		// Send progress update via callback (throttle to every 3 frames for performance)
 		if progressCb != nil && frameNum%3 == 0 {
-			// Convert bar magnitudes to slice for progress update
-			barHeights := make([]float64, config.NumBars)
-			for i := range config.NumBars {
-				barHeights[i] = analysis.BarMagnitudes[i]
-			}
-
 			elapsed := time.Since(startTime)
 			// No total frames estimate available during first pass
 			progressCb(frameNum, 0, analysis.RMSLevel, analysis.PeakMagnitude, barHeights, elapsed)
@@ -125,10 +114,6 @@ func AnalyzeAudio(filename string, progressCb ProgressCallback) (*Profile, error
 			if errors.Is(err, io.EOF) {
 				// Send final progress update
 				if progressCb != nil {
-					barHeights := make([]float64, config.NumBars)
-					for i := range config.NumBars {
-						barHeights[i] = analysis.BarMagnitudes[i]
-					}
 					elapsed := time.Since(startTime)
 					progressCb(frameNum, frameNum, analysis.RMSLevel, analysis.PeakMagnitude, barHeights, elapsed)
 				}
@@ -176,8 +161,10 @@ func AnalyzeAudio(filename string, progressCb ProgressCallback) (*Profile, error
 	return profile, nil
 }
 
-// analyzeFrame extracts statistics from FFT coefficients and audio chunk
-func analyzeFrame(coeffs []complex128, audioChunk []float64) FrameAnalysis {
+// analyzeFrame extracts statistics from FFT coefficients and audio chunk.
+// barMagnitudes is an optional buffer that receives per-bar average magnitudes
+// for progress display; pass nil when bar magnitudes are not needed.
+func analyzeFrame(coeffs []complex128, audioChunk []float64, barMagnitudes []float64) FrameAnalysis {
 	analysis := FrameAnalysis{}
 
 	// Calculate RMS of audio chunk
@@ -187,7 +174,7 @@ func analyzeFrame(coeffs []complex128, audioChunk []float64) FrameAnalysis {
 	}
 	analysis.RMSLevel = math.Sqrt(sumSquares / float64(len(audioChunk)))
 
-	// Analyze frequency bins (same logic as BinFFT)
+	// Analyse frequency bins (same logic as BinFFT)
 	// Use full spectrum up to Nyquist frequency for complete frequency coverage
 	halfSize := len(coeffs) / 2
 	maxFreqBin := halfSize
@@ -205,7 +192,9 @@ func analyzeFrame(coeffs []complex128, audioChunk []float64) FrameAnalysis {
 		}
 
 		avgMagnitude := sum / float64(binsPerBar)
-		analysis.BarMagnitudes[bar] = avgMagnitude
+		if barMagnitudes != nil {
+			barMagnitudes[bar] = avgMagnitude
+		}
 
 		// Track peak
 		if avgMagnitude > analysis.PeakMagnitude {

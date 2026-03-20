@@ -10,16 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/progress"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/linuxmatters/jivefire/internal/cli"
-)
-
-// Fire colour palette - import shared colours from cli package
-var (
-	fireYellow  = cli.FireYellow
-	fireOrange  = cli.FireOrange
-	fireRed     = cli.FireRed
-	fireCrimson = cli.FireCrimson
-	warmGray    = cli.WarmGray
+	"github.com/linuxmatters/jivefire/internal/theme"
 )
 
 // Phase represents the current processing phase
@@ -129,14 +120,14 @@ type Model struct {
 func NewModel(noPreview bool) *Model {
 	// Fire gradient: deep red → orange → yellow
 	p := progress.New(
-		progress.WithGradient(string(fireCrimson), string(fireYellow)),
+		progress.WithGradient(string(theme.FireCrimson), string(theme.FireYellow)),
 		progress.WithWidth(40),
 		progress.WithoutPercentage(),
 	)
 
 	// Smaller progress bar for summary performance charts
 	summaryBar := progress.New(
-		progress.WithGradient(string(fireCrimson), string(fireYellow)),
+		progress.WithGradient(string(theme.FireCrimson), string(theme.FireYellow)),
 		progress.WithWidth(30),
 		progress.WithoutPercentage(),
 	)
@@ -238,12 +229,12 @@ func (m *Model) renderFinalProgress() string {
 	// Title
 	title := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(fireYellow).
+		Foreground(theme.FireYellow).
 		Render("Jivefire 🔥")
 
 	s.WriteString(title)
 	s.WriteString("\n")
-	s.WriteString(lipgloss.NewStyle().Foreground(fireOrange).Render("Pass 2: Rendering & Encoding"))
+	s.WriteString(lipgloss.NewStyle().Foreground(theme.FireOrange).Render("Pass 2: Rendering & Encoding"))
 	s.WriteString("\n\n")
 
 	// Progress bar at 100%
@@ -284,7 +275,7 @@ func (m *Model) renderFinalProgress() string {
 
 	return lipgloss.NewStyle().
 		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(fireOrange).
+		BorderForeground(theme.FireOrange).
 		Padding(1, 2).
 		Render(s.String())
 }
@@ -295,7 +286,7 @@ func (m *Model) renderProgress() string {
 	// Title
 	title := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(fireYellow).
+		Foreground(theme.FireYellow).
 		Render("Jivefire 🔥")
 
 	s.WriteString(title)
@@ -308,7 +299,7 @@ func (m *Model) renderProgress() string {
 	} else {
 		phaseLabel = "Pass 2: Rendering & Encoding"
 	}
-	s.WriteString(lipgloss.NewStyle().Foreground(fireOrange).Render(phaseLabel))
+	s.WriteString(lipgloss.NewStyle().Foreground(theme.FireOrange).Render(phaseLabel))
 	s.WriteString("\n\n")
 
 	// Progress bar and timing
@@ -330,7 +321,7 @@ func (m *Model) renderProgress() string {
 
 	return lipgloss.NewStyle().
 		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(fireRed).
+		BorderForeground(theme.FireRed).
 		Padding(1, 2).
 		Render(s.String())
 }
@@ -440,7 +431,7 @@ func (m *Model) renderAudioProfile(s *strings.Builder) {
 }
 
 func (m *Model) renderSpectrumAndStats(s *strings.Builder) {
-	s.WriteString(lipgloss.NewStyle().Foreground(fireOrange).Render("Live Visualisation:"))
+	s.WriteString(lipgloss.NewStyle().Foreground(theme.FireOrange).Render("Live Visualisation:"))
 	s.WriteString("\n")
 
 	// Use full width for spectrum (64 bars matches the actual bar count)
@@ -452,7 +443,7 @@ func (m *Model) renderSpectrumAndStats(s *strings.Builder) {
 
 	var rightCol strings.Builder
 	if m.renderState.FileSize > 0 || m.renderState.VideoCodec != "" || m.renderState.AudioCodec != "" {
-		labelStyle := lipgloss.NewStyle().Foreground(warmGray)
+		labelStyle := lipgloss.NewStyle().Foreground(theme.WarmGray)
 		valueStyle := lipgloss.NewStyle().Bold(true)
 
 		rightCol.WriteString(labelStyle.Render("File:  "))
@@ -497,7 +488,7 @@ func (m *Model) renderComplete() string {
 
 	title := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(fireYellow).
+		Foreground(theme.FireYellow).
 		Render("✓ Encoding Complete!")
 
 	s.WriteString(title)
@@ -527,10 +518,10 @@ func (m *Model) renderComplete() string {
 	fmt.Fprintf(&s, "%s%s\n\n", dimLabel.Render("Size:     "), formatBytes(m.complete.FileSize))
 
 	// Audio Profile section
-	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(fireOrange)
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.FireOrange)
 	labelStyle := lipgloss.NewStyle().Faint(true)
 	valueStyle := lipgloss.NewStyle()
-	highlightValueStyle := lipgloss.NewStyle().Foreground(fireOrange)
+	highlightValueStyle := lipgloss.NewStyle().Foreground(theme.FireOrange)
 
 	totalMs := m.complete.TotalTime.Milliseconds()
 	if totalMs == 0 {
@@ -603,7 +594,7 @@ func (m *Model) renderComplete() string {
 
 	return lipgloss.NewStyle().
 		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(fireOrange).
+		BorderForeground(theme.FireOrange).
 		Padding(1, 1).
 		Render(s.String()) + "\n"
 }
@@ -649,7 +640,10 @@ func renderSpectrum(barHeights []float64, width int) string {
 
 	blocks := []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
 
-	// Fire gradient colours from low to high intensity
+	// Gradient expansion of the four base theme colours (FireCrimson, FireRed,
+	// FireOrange, FireYellow) into eight steps for smoother spectrum colouring.
+	// This is not duplication - these intermediate values provide visual fidelity
+	// that the four base colours alone cannot.
 	fireColors := []lipgloss.Color{
 		lipgloss.Color("#8B0000"), // Dark red (ember)
 		lipgloss.Color("#B22222"), // Firebrick
