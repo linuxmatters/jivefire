@@ -24,7 +24,7 @@
 - `internal/encoder/` — ffmpeg-statigo wrapper, RGB→YUV conversion, FIFO buffer
 - `internal/yuv/` — YCbCr coefficients, `RGBToY`/`RGBToCb`/`RGBToCr`, `ParallelRows`
 - `internal/renderer/` — Frame generation, bar drawing, thumbnail
-- `internal/ui/` — Bubbletea TUI (unified progress.go for both passes)
+- `internal/ui/` — Bubbletea v2 TUI (unified progress.go for both passes)
 - `internal/config/` — Constants (dimensions, FFT params, colours)
 
 ## FFmpeg Integration
@@ -33,6 +33,16 @@
 - `*.gen.go` files in submodule are auto-generated — do not edit
 - Audio decoding: `internal/audio/reader.go` — `NewStreamingReader` returns `*StreamingReader`
 - Video/audio encoding: `internal/encoder/encoder.go` wraps libx264/AAC
+
+## Charm TUI (v2)
+
+- Use the Charm v2 suite: import paths are `charm.land/bubbletea/v2`, `charm.land/lipgloss/v2`, `charm.land/bubbles/v2` — NOT `github.com/charmbracelet/...`. Package names are unchanged (`tea`, `lipgloss`, `progress`)
+- `harmonica` has no v2; stays at `github.com/charmbracelet/harmonica` (indirect)
+- v2 API gotchas vs v1:
+  - `Model.View()` returns `tea.View`, not `string`; set `v.AltScreen = true` instead of `tea.WithAltScreen()`
+  - Key messages are `tea.KeyPressMsg`, not `tea.KeyMsg`
+  - `lipgloss.Color` returns a `color.Color`; pass it to `progress.WithColors`, not `WithGradient` or string casts
+  - Set progress width with `SetWidth()`, not the `.Width` field
 
 ## Audio Processing
 
