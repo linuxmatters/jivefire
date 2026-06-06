@@ -37,7 +37,7 @@ type AnalysisProgress struct {
 type AnalysisComplete struct {
 	PeakMagnitude float64
 	RMSLevel      float64
-	DynamicRange  float64
+	DynamicRange  float64 // raw peak/RMS ratio; converted to dB at assignment
 	Duration      time.Duration
 	OptimalScale  float64
 	AnalysisTime  time.Duration
@@ -78,7 +78,7 @@ type AudioProfile struct {
 	Duration     time.Duration
 	PeakLevel    float64 // in dB
 	RMSLevel     float64 // in dB
-	DynamicRange float64 // in dB
+	DynamicRange float64 // in dB (converted from the raw peak/RMS ratio)
 	OptimalScale float64
 	AnalysisTime time.Duration
 }
@@ -169,7 +169,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Duration:     msg.Duration,
 			PeakLevel:    20 * math.Log10(msg.PeakMagnitude),
 			RMSLevel:     20 * math.Log10(msg.RMSLevel),
-			DynamicRange: msg.DynamicRange,
+			DynamicRange: 20 * math.Log10(msg.DynamicRange),
 			OptimalScale: msg.OptimalScale,
 			AnalysisTime: msg.AnalysisTime,
 		}
