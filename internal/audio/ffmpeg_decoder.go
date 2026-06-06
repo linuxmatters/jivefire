@@ -316,31 +316,3 @@ func (d *FFmpegDecoder) Close() error {
 	}
 	return nil
 }
-
-// SeekToSample seeks to the specified sample position.
-// This enables efficient re-reading for Pass 2 without re-opening the file.
-func (d *FFmpegDecoder) SeekToSample(samplePos int64) error {
-	// Clear sample buffer
-	d.sampleBuffer = d.sampleBuffer[:0]
-
-	// Convert sample position to timestamp
-	stream := d.formatCtx.Streams().Get(uintptr(d.streamIndex)) //nolint:gosec // stream index is non-negative
-	timeBase := stream.TimeBase()
-
-	// Calculate timestamp: samplePos / sampleRate * timeBase.Den / timeBase.Num
-	timestamp := samplePos * int64(timeBase.Den()) / (int64(d.sampleRate) * int64(timeBase.Num()))
-
-	// Seek to timestamp
-	ret, err := ffmpeg.AVSeekFrame(d.formatCtx, d.streamIndex, timestamp, ffmpeg.AVSeekFlagBackward)
-	if err != nil {
-		return fmt.Errorf("failed to seek: %w", err)
-	}
-	if ret < 0 {
-		return fmt.Errorf("failed to seek: error code %d", ret)
-	}
-
-	// Flush codec buffers
-	ffmpeg.AVCodecFlushBuffers(d.codecCtx)
-
-	return nil
-}
