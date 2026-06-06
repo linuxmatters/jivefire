@@ -83,6 +83,13 @@ func NewStreamingReader(filename string) (*StreamingReader, error) {
 	d.sampleRate = d.codecCtx.SampleRate()
 	d.channels = d.codecCtx.ChLayout().NbChannels()
 
+	// Sample extraction only handles mono and stereo layouts; planar sources
+	// with more channels would read past the first channel plane.
+	if d.channels != 1 && d.channels != 2 {
+		d.Close()
+		return nil, fmt.Errorf("unsupported channel count: %d", d.channels)
+	}
+
 	// Validate format support
 	sampleFmt := d.codecCtx.SampleFmt()
 	supportedFormats := map[ffmpeg.AVSampleFormat]bool{
