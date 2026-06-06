@@ -1,1 +1,1 @@
-Load AGENTS.md
+@AGENTS.md
