@@ -645,5 +645,6 @@ func runPass2(p *tea.Program, profile *audio.Profile, cfg pass2Config) {
 		ThumbnailTime:    cfg.thumbnailDuration,
 		SamplesProcessed: samplesProcessed,
 		EncoderName:      enc.EncoderName(),
+		EncoderIsHW:      enc.IsHardware(),
 	})
 }
