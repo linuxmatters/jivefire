@@ -556,11 +556,7 @@ func (e *Encoder) initializeAudioEncoder() error {
 	outputChannels := e.outputChannels()
 
 	// Set channel layout using FFmpeg 8.0 API
-	if outputChannels == 1 {
-		ffmpeg.AVChannelLayoutDefault(e.audioCodec.ChLayout(), 1)
-	} else {
-		ffmpeg.AVChannelLayoutDefault(e.audioCodec.ChLayout(), 2)
-	}
+	ffmpeg.AVChannelLayoutDefault(e.audioCodec.ChLayout(), outputChannels)
 
 	e.audioCodec.SetBitRate(192000) // 192 kbps
 	e.audioStream.SetTimeBase(ffmpeg.AVMakeQ(1, e.audioCodec.SampleRate()))
@@ -589,11 +585,7 @@ func (e *Encoder) initializeAudioEncoder() error {
 	// Configure encoder frame with correct size
 	e.audioEncFrame.SetNbSamples(e.audioCodec.FrameSize())
 	e.audioEncFrame.SetFormat(int(ffmpeg.AVSampleFmtFltp))
-	if outputChannels == 1 {
-		ffmpeg.AVChannelLayoutDefault(e.audioEncFrame.ChLayout(), 1)
-	} else {
-		ffmpeg.AVChannelLayoutDefault(e.audioEncFrame.ChLayout(), 2)
-	}
+	ffmpeg.AVChannelLayoutDefault(e.audioEncFrame.ChLayout(), outputChannels)
 	e.audioEncFrame.SetSampleRate(e.audioCodec.SampleRate())
 
 	ret, err = ffmpeg.AVFrameGetBuffer(e.audioEncFrame, 0)
