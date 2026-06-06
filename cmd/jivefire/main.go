@@ -339,12 +339,9 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 	// Get audio format information for codec display
 	audioSampleRate := reader.SampleRate()
 	// Use output channel count (from CLI), not input channel count
-	outputChannels := channels
 	audioChannelStr := "mono"
-	if outputChannels == 2 {
+	if channels == 2 {
 		audioChannelStr = "stereo"
-	} else if outputChannels > 2 {
-		audioChannelStr = fmt.Sprintf("%dch", outputChannels)
 	}
 	audioCodecInfo := fmt.Sprintf("AAC %.1fkHz %s", float64(audioSampleRate)/1000.0, audioChannelStr)
 
