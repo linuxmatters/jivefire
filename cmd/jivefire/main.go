@@ -573,9 +573,7 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 		if nRead < samplesPerFrame {
 			copy(fftBuffer[config.FFTSize-samplesPerFrame:], newSamples[:nRead])
 			// Zero-fill the remaining space
-			for i := config.FFTSize - samplesPerFrame + nRead; i < config.FFTSize; i++ {
-				fftBuffer[i] = 0
-			}
+			clear(fftBuffer[config.FFTSize-samplesPerFrame+nRead:])
 		} else {
 			copy(fftBuffer[config.FFTSize-samplesPerFrame:], newSamples[:nRead])
 		}
