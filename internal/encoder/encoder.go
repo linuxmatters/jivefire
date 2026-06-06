@@ -524,6 +524,11 @@ func (e *Encoder) EncoderName() string {
 	return "libx264"
 }
 
+// IsHardware reports whether encoding ran on a hardware-backed encoder.
+func (e *Encoder) IsHardware() bool {
+	return e.hwEncoder != nil
+}
+
 // outputChannels returns the configured audio channel count, defaulting to mono.
 func (e *Encoder) outputChannels() int {
 	if e.config.AudioChannels == 0 {

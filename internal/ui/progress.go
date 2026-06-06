@@ -70,6 +70,7 @@ type RenderComplete struct {
 	ThumbnailTime    time.Duration
 	SamplesProcessed int64
 	EncoderName      string // Video encoder used (e.g., "h264_nvenc", "libx264")
+	EncoderIsHW      bool   // Whether the encoder was hardware-backed
 }
 
 // AudioProfile holds the audio analysis results for display
@@ -581,11 +582,7 @@ func (m *Model) renderComplete() string {
 		// Label based on encoder type: hardware encoders have GPU pipeline overhead,
 		// software encoder has Go runtime/GC overhead
 		otherLabel := "Runtime:"
-		if strings.Contains(m.complete.EncoderName, "nvenc") ||
-			strings.Contains(m.complete.EncoderName, "vulkan") ||
-			strings.Contains(m.complete.EncoderName, "vaapi") ||
-			strings.Contains(m.complete.EncoderName, "qsv") ||
-			strings.Contains(m.complete.EncoderName, "videotoolbox") {
+		if m.complete.EncoderIsHW {
 			otherLabel = "GPU pipeline:"
 		}
 		writeBarRow(otherLabel, otherTime)
