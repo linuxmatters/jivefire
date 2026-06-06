@@ -3,6 +3,7 @@ package ui
 import (
 	"image"
 	"image/color"
+	"strconv"
 	"strings"
 )
 
@@ -105,11 +106,11 @@ func RenderPreview(preview [][]color.RGBA) string {
 			// Build ANSI escape manually (faster than fmt.Sprintf)
 			colorBuf = colorBuf[:0]
 			colorBuf = append(colorBuf, "\x1b[48;2;"...)
-			colorBuf = appendInt(colorBuf, int(pixel.R))
+			colorBuf = strconv.AppendInt(colorBuf, int64(pixel.R), 10)
 			colorBuf = append(colorBuf, ';')
-			colorBuf = appendInt(colorBuf, int(pixel.G))
+			colorBuf = strconv.AppendInt(colorBuf, int64(pixel.G), 10)
 			colorBuf = append(colorBuf, ';')
-			colorBuf = appendInt(colorBuf, int(pixel.B))
+			colorBuf = strconv.AppendInt(colorBuf, int64(pixel.B), 10)
 			colorBuf = append(colorBuf, "m \x1b[0m"...)
 			builder.Write(colorBuf)
 		}
@@ -122,27 +123,4 @@ func RenderPreview(preview [][]color.RGBA) string {
 	builder.WriteString("┘")
 
 	return builder.String()
-}
-
-// appendInt appends integer to byte slice without allocation (faster than strconv.Itoa)
-func appendInt(buf []byte, n int) []byte {
-	if n == 0 {
-		return append(buf, '0')
-	}
-
-	// Handle numbers up to 255 (max RGB value)
-	switch {
-	case n >= 100:
-		buf = append(buf, byte('0'+n/100)) //nolint:gosec // n/100 is 1 or 2 for values 0-255
-		n %= 100
-		buf = append(buf, byte('0'+n/10))
-		buf = append(buf, byte('0'+n%10))
-	case n >= 10:
-		buf = append(buf, byte('0'+n/10))
-		buf = append(buf, byte('0'+n%10))
-	default:
-		buf = append(buf, byte('0'+n)) //nolint:gosec // n is 0-9 here
-	}
-
-	return buf
 }

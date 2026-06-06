@@ -1,6 +1,7 @@
 package audio
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -195,27 +196,20 @@ func unsafeByteSlice(ptr unsafe.Pointer, length int) []byte {
 // decodeS16 decodes a signed 16-bit little-endian sample at byte offset i,
 // normalised to [-1.0, 1.0].
 func decodeS16(buf []byte, i int) float64 {
-	val := int16(buf[i]) | int16(buf[i+1])<<8
+	val := int16(binary.LittleEndian.Uint16(buf[i:]))
 	return float64(val) / 32768.0
 }
 
 // decodeS32 decodes a signed 32-bit little-endian sample at byte offset i,
 // normalised to [-1.0, 1.0].
 func decodeS32(buf []byte, i int) float64 {
-	val := int32(buf[i]) |
-		int32(buf[i+1])<<8 |
-		int32(buf[i+2])<<16 |
-		int32(buf[i+3])<<24
+	val := int32(binary.LittleEndian.Uint32(buf[i:]))
 	return float64(val) / 2147483648.0
 }
 
 // decodeF32 decodes a 32-bit IEEE 754 float sample at byte offset i.
 func decodeF32(buf []byte, i int) float64 {
-	bits := uint32(buf[i]) |
-		uint32(buf[i+1])<<8 |
-		uint32(buf[i+2])<<16 |
-		uint32(buf[i+3])<<24
-	return float64(math.Float32frombits(bits))
+	return float64(math.Float32frombits(binary.LittleEndian.Uint32(buf[i:])))
 }
 
 // sampleDecoder selects the appropriate decode function and bytes-per-sample
