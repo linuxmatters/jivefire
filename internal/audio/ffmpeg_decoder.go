@@ -84,14 +84,14 @@ func NewFFmpegDecoder(filename string) (*FFmpegDecoder, error) {
 	d.channels = d.codecCtx.ChLayout().NbChannels()
 
 	// Validate format support
-	sampleFmt := int32(d.codecCtx.SampleFmt())
-	supportedFormats := map[int32]bool{
-		1: true, // AVSampleFmtS16 - 16-bit signed interleaved
-		2: true, // AVSampleFmtS32 - 32-bit signed interleaved
-		3: true, // AVSampleFmtFlt - 32-bit float interleaved
-		6: true, // AVSampleFmtS16P - 16-bit signed planar
-		7: true, // AVSampleFmtS32P - 32-bit signed planar
-		8: true, // AVSampleFmtFltp - 32-bit float planar
+	sampleFmt := d.codecCtx.SampleFmt()
+	supportedFormats := map[ffmpeg.AVSampleFormat]bool{
+		ffmpeg.AVSampleFmtS16:  true, // 16-bit signed interleaved
+		ffmpeg.AVSampleFmtS32:  true, // 32-bit signed interleaved
+		ffmpeg.AVSampleFmtFlt:  true, // 32-bit float interleaved
+		ffmpeg.AVSampleFmtS16P: true, // 16-bit signed planar
+		ffmpeg.AVSampleFmtS32P: true, // 32-bit signed planar
+		ffmpeg.AVSampleFmtFltp: true, // 32-bit float planar
 	}
 	if !supportedFormats[sampleFmt] {
 		d.Close()
@@ -241,8 +241,12 @@ func (d *FFmpegDecoder) extractSamples() ([]float64, error) {
 
 	samples := make([]float64, nbSamples)
 
-	// Determine if format is planar (planar formats start at 5)
-	isPlanar := sampleFormat >= 5
+	// Determine if format is planar (one sample plane per channel)
+	var isPlanar bool
+	switch ffmpeg.AVSampleFormat(sampleFormat) {
+	case ffmpeg.AVSampleFmtS16P, ffmpeg.AVSampleFmtS32P, ffmpeg.AVSampleFmtFltp:
+		isPlanar = true
+	}
 
 	switch {
 	case isPlanar && channels == 2:
