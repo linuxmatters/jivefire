@@ -250,7 +250,18 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 		})
 
 		// === PASS 2: Rendering & Encoding ===
-		runPass2(p, inputFile, outputFile, channels, noPreview, hwAccel, runtimeConfig, profile, thumbnailDuration, overallStartTime, title, episode)
+		runPass2(p, profile, pass2Config{
+			inputFile:         inputFile,
+			outputFile:        outputFile,
+			channels:          channels,
+			noPreview:         noPreview,
+			hwAccel:           hwAccel,
+			runtimeConfig:     runtimeConfig,
+			title:             title,
+			episode:           episode,
+			thumbnailDuration: thumbnailDuration,
+			overallStartTime:  overallStartTime,
+		})
 	}()
 
 	// Run the unified Bubbletea UI (uses alternate screen buffer)
@@ -274,9 +285,24 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 	}
 }
 
-func runPass2(p *tea.Program, inputFile string, outputFile string, channels int, noPreview bool, hwAccel encoder.HWAccelType, runtimeConfig *config.RuntimeConfig, profile *audio.Profile, thumbnailDuration time.Duration, overallStartTime time.Time, title string, episode int) {
+// pass2Config groups the encoding and timing parameters for runPass2 so the
+// call site uses named fields and transposed arguments can't compile silently.
+type pass2Config struct {
+	inputFile         string
+	outputFile        string
+	channels          int
+	noPreview         bool
+	hwAccel           encoder.HWAccelType
+	runtimeConfig     *config.RuntimeConfig
+	title             string
+	episode           int
+	thumbnailDuration time.Duration
+	overallStartTime  time.Time
+}
+
+func runPass2(p *tea.Program, profile *audio.Profile, cfg pass2Config) {
 	// Open streaming reader for Pass 2
-	reader, err := audio.NewStreamingReader(inputFile)
+	reader, err := audio.NewStreamingReader(cfg.inputFile)
 	if err != nil {
 		cli.PrintError(fmt.Sprintf("opening audio stream: %v", err))
 		p.Quit()
@@ -286,13 +312,13 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 
 	// Initialize encoder with video and audio (using new sample-based API)
 	enc, err := encoder.New(encoder.Config{
-		OutputPath:    outputFile,
+		OutputPath:    cfg.outputFile,
 		Width:         config.Width,
 		Height:        config.Height,
 		Framerate:     config.FPS,
 		SampleRate:    reader.SampleRate(), // Use sample rate from audio file
-		AudioChannels: channels,            // Mono (1) or stereo (2)
-		HWAccel:       hwAccel,             // Hardware acceleration type
+		AudioChannels: cfg.channels,        // Mono (1) or stereo (2)
+		HWAccel:       cfg.hwAccel,         // Hardware acceleration type
 	})
 	if err != nil {
 		cli.PrintError(fmt.Sprintf("creating encoder: %v", err))
@@ -310,7 +336,7 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 	defer enc.Close()
 
 	// Load background image (custom or embedded)
-	bgImage, err := renderer.LoadBackgroundImage(runtimeConfig)
+	bgImage, err := renderer.LoadBackgroundImage(cfg.runtimeConfig)
 	if err != nil {
 		bgImage = nil
 	}
@@ -323,7 +349,7 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 
 	// Create audio processor and frame renderer
 	processor := audio.NewProcessor()
-	frame := renderer.NewFrame(bgImage, fontFace, episode, title, runtimeConfig)
+	frame := renderer.NewFrame(bgImage, fontFace, cfg.episode, cfg.title, cfg.runtimeConfig)
 
 	// Calculate frames from profile
 	numFrames := profile.NumFrames
@@ -338,7 +364,7 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 	audioSampleRate := reader.SampleRate()
 	// Use output channel count (from CLI), not input channel count
 	audioChannelStr := "mono"
-	if channels == 2 {
+	if cfg.channels == 2 {
 		audioChannelStr = "stereo"
 	}
 	audioCodecInfo := fmt.Sprintf("AAC %.1fkHz %s", float64(audioSampleRate)/1000.0, audioChannelStr)
@@ -507,13 +533,13 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 
 			// Get actual file size from disk (not an estimate)
 			var currentFileSize int64
-			if fileInfo, err := os.Stat(outputFile); err == nil {
+			if fileInfo, err := os.Stat(cfg.outputFile); err == nil {
 				currentFileSize = fileInfo.Size()
 			}
 
 			// Include frame data for preview (skip if disabled)
 			var frameData *image.RGBA
-			if !noPreview {
+			if !cfg.noPreview {
 				frameData = img
 			}
 
@@ -593,7 +619,7 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 	totalTime := time.Since(renderStartTime)
 
 	// Get actual file size
-	fileInfo, err := os.Stat(outputFile)
+	fileInfo, err := os.Stat(cfg.outputFile)
 	var actualFileSize int64
 	if err == nil {
 		actualFileSize = fileInfo.Size()
@@ -603,11 +629,11 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 	samplesProcessed := int64(profile.SampleRate) * int64(profile.Duration)
 
 	// Calculate overall total time from the very beginning
-	overallTotalTime := time.Since(overallStartTime)
+	overallTotalTime := time.Since(cfg.overallStartTime)
 
 	// Send completion message
 	p.Send(ui.RenderComplete{
-		OutputFile:       outputFile,
+		OutputFile:       cfg.outputFile,
 		Duration:         totalTime,
 		FileSize:         actualFileSize,
 		TotalFrames:      numFrames,
@@ -616,7 +642,7 @@ func runPass2(p *tea.Program, inputFile string, outputFile string, channels int,
 		AudioTime:        totalAudio,
 		FinalizeTime:     totalFinalize,
 		TotalTime:        overallTotalTime,
-		ThumbnailTime:    thumbnailDuration,
+		ThumbnailTime:    cfg.thumbnailDuration,
 		SamplesProcessed: samplesProcessed,
 		EncoderName:      enc.EncoderName(),
 	})
