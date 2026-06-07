@@ -25,11 +25,9 @@ func (m *Model) renderComplete() string {
 	// Styles for output summary
 	dimLabel := lipgloss.NewStyle().Faint(true)
 
-	// Output summary
+	// Output summary. Size, source duration, total time taken and the encoder now
+	// live in the finished Pass 2 box above, so they are omitted here.
 	fmt.Fprintf(&s, "%s%s\n", dimLabel.Render("Output:   "), m.complete.OutputFile)
-	if m.complete.EncoderName != "" {
-		fmt.Fprintf(&s, "%s%s\n", dimLabel.Render("Encoder:  "), m.complete.EncoderName)
-	}
 
 	videoDuration := time.Duration(m.complete.TotalFrames) * time.Second / config.FPS
 	fmt.Fprintf(&s, "%s%d frames, %.2f fps average\n",
@@ -37,13 +35,10 @@ func (m *Model) renderComplete() string {
 		m.complete.TotalFrames,
 		float64(m.complete.TotalFrames)/videoDuration.Seconds())
 	if m.complete.SamplesProcessed > 0 {
-		fmt.Fprintf(&s, "%s%d samples processed\n", dimLabel.Render("Audio:    "), m.complete.SamplesProcessed)
+		fmt.Fprintf(&s, "%s%d samples processed\n\n", dimLabel.Render("Audio:    "), m.complete.SamplesProcessed)
+	} else {
+		s.WriteString("\n")
 	}
-	fmt.Fprintf(&s, "%s%.1fs video in %.1fs\n",
-		dimLabel.Render("Duration: "),
-		videoDuration.Seconds(),
-		m.complete.TotalTime.Seconds())
-	fmt.Fprintf(&s, "%s%s\n\n", dimLabel.Render("Size:     "), formatBytes(m.complete.FileSize))
 
 	// Audio Profile section
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.FireOrange)
@@ -69,7 +64,6 @@ func (m *Model) renderComplete() string {
 			}
 			return valueStyle
 		})
-		pass1.Row("Duration:", fmt.Sprintf("%.1fs", m.audioProfile.Duration.Seconds()))
 		pass1.Row("Peak Level:", fmt.Sprintf("%.1f dB", m.audioProfile.PeakLevel))
 		pass1.Row("RMS Level:", fmt.Sprintf("%.1f dB", m.audioProfile.RMSLevel))
 		pass1.Row("Dynamic Range:", fmt.Sprintf("%.1f dB", m.audioProfile.DynamicRange))

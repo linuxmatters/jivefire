@@ -191,6 +191,12 @@ const boxDesignWidth = 80
 // brackets, distinct from the lighter theme.WarmGray used for labels.
 var midGrey = lipgloss.Color("#808080")
 
+// finalCardWidth is the inner content width of each gauge card in the finished
+// Pass 2 box. The four cards have no sparkline, so equal widths read cleanly; 12
+// cells fit the "🎜 Duration" header without truncation, and the joined
+// row (4×(12+4 chrome) + 3 separators = 67) stays inside the 74-cell content area.
+const finalCardWidth = 12
+
 // boxContentWidth returns the shared outer width applied to every bordered box.
 // lipgloss treats .Width(n) on a bordered style as the box's overall width
 // (border included), so applying this single value to all box styles yields
@@ -446,28 +452,34 @@ func (m *Model) renderFinalProgress() string {
 	writeProgressRow(&s, m.progressBar.ViewAs(1.0), 100)
 	s.WriteString("\n\n")
 
-	// Final timing - calculate and display final speed
+	// Final timing — the finished mirror of the live Pass 2 gauge cards. Time is
+	// the total time taken; Speed is the final realtime ratio (no live sparkline);
+	// Size is the final file size; the live ETA card is repurposed as a Duration
+	// card showing the source audio length, with the 🎜 glyph in vivid red.
 	videoDuration := time.Duration(m.complete.TotalFrames) * time.Second / config.FPS
 	var finalSpeed float64
 	if m.complete.TotalTime > 0 {
 		finalSpeed = float64(videoDuration) / float64(m.complete.TotalTime)
 	}
-	s.WriteString(lipgloss.NewStyle().Faint(true).Render(
-		fmt.Sprintf("Time: %s  │  Speed: %.1fx realtime  │  Complete", formatDuration(m.complete.TotalTime), finalSpeed)))
-	s.WriteString("\n")
+	var sourceDuration time.Duration
+	if m.audioProfile != nil {
+		sourceDuration = m.audioProfile.Duration
+	}
 
-	// Final spectrum - zeroed out to show clean state. Derive the width from the
-	// shared box width (outer minus the 1-cell border and 2 columns of padding on
-	// each side) so the spectrum fills the box consistently and never exceeds the
-	// content area, which would wrap.
-	spectrumWidth := max(m.boxContentWidth()-6, 10)
-	s.WriteString("\n\n")
-	s.WriteString(lipgloss.NewStyle().Faint(true).Render("Live Visualisation:"))
+	timeCard := gaugeCard("⏱", lipgloss.Color("#FFFFFF"), "Time", formatDuration(m.complete.TotalTime), finalCardWidth)
+	speedCard := gaugeCard("⚡", theme.WarmGray, "Speed", fmt.Sprintf("%.1fx", finalSpeed), finalCardWidth)
+	sizeCard := gaugeCard("🖬", lipgloss.Color("#FF8C00"), "Size", formatSizeGlyph(m.complete.FileSize), finalCardWidth)
+	durationCard := gaugeCard("🎜", lipgloss.Color("#FF2D2D"), "Duration", formatDuration(sourceDuration), finalCardWidth)
+
+	cardsRow := lipgloss.JoinHorizontal(lipgloss.Top, timeCard, " ", speedCard, " ", sizeCard, " ", durationCard)
+	s.WriteString(cardsRow)
+
+	// Frame line in finished form: a static mid-grey check leads "Frame: N / N"
+	// (no animated spinner, which would freeze as a glitch in the post-exit static
+	// print). The codec info matches the live line exactly, right-aligned to the
+	// cards-row width.
 	s.WriteString("\n")
-	// Create zeroed bar heights for clean display
-	zeroedBars := make([]float64, 64)
-	spectrum := renderSpectrum(zeroedBars, spectrumWidth)
-	s.WriteString(spectrum)
+	m.writeFinalFrameLine(&s, lipgloss.Width(cardsRow))
 
 	return lipgloss.NewStyle().
 		BorderStyle(lipgloss.RoundedBorder()).
@@ -684,7 +696,6 @@ func (m *Model) spectrumWidth() int {
 func (m *Model) writeFrameSourceLine(s *strings.Builder, rowWidth int) {
 	labelStyle := lipgloss.NewStyle().Foreground(theme.WarmGray)
 	valueStyle := lipgloss.NewStyle().Bold(true)
-	greyStyle := lipgloss.NewStyle().Foreground(midGrey)
 
 	frame := lipgloss.JoinHorizontal(lipgloss.Top,
 		m.spinner.View(),
@@ -692,14 +703,47 @@ func (m *Model) writeFrameSourceLine(s *strings.Builder, rowWidth int) {
 		valueStyle.Render(fmt.Sprintf("%d / %d", m.renderState.Frame, m.renderState.TotalFrames)),
 	)
 
+	writeFrameLine(s, frame, m.codecInfo(m.renderState.EncoderName), rowWidth)
+}
+
+// writeFinalFrameLine writes the finished Pass 2 frame line: a static mid-grey
+// check leads "Frame: N / N" (both N from the completion's total frame count, the
+// encode being done) with no animated spinner, and the same right-aligned codec
+// info as the live line. The encoder name falls back to the completion record
+// when the live render state has been cleared.
+func (m *Model) writeFinalFrameLine(s *strings.Builder, rowWidth int) {
+	labelStyle := lipgloss.NewStyle().Foreground(theme.WarmGray)
+	valueStyle := lipgloss.NewStyle().Bold(true)
+	checkStyle := lipgloss.NewStyle().Foreground(midGrey)
+
+	frame := lipgloss.JoinHorizontal(lipgloss.Top,
+		checkStyle.Render("✓ "),
+		labelStyle.Render("Frame: "),
+		valueStyle.Render(fmt.Sprintf("%d / %d", m.complete.TotalFrames, m.complete.TotalFrames)),
+	)
+
+	encoder := m.renderState.EncoderName
+	if encoder == "" {
+		encoder = m.complete.EncoderName
+	}
+	writeFrameLine(s, frame, m.codecInfo(encoder), rowWidth)
+}
+
+// codecInfo builds the compact codec summary shared by the live and finished
+// frame lines: the video codec with the encoder name in mid-grey brackets, then
+// the audio codec, joined with " · ". Returns "" when no codec data is present.
+func (m *Model) codecInfo(encoder string) string {
+	valueStyle := lipgloss.NewStyle().Bold(true)
+	greyStyle := lipgloss.NewStyle().Foreground(midGrey)
+
 	var codec string
 	if m.renderState.VideoCodec != "" {
 		video := valueStyle.Render(compactCodec(m.renderState.VideoCodec))
-		if m.renderState.EncoderName != "" {
+		if encoder != "" {
 			video = lipgloss.JoinHorizontal(lipgloss.Top,
 				video,
 				valueStyle.Render(" "),
-				greyStyle.Render(fmt.Sprintf("(%s)", m.renderState.EncoderName)),
+				greyStyle.Render(fmt.Sprintf("(%s)", encoder)),
 			)
 		}
 		codec = video
@@ -712,14 +756,18 @@ func (m *Model) writeFrameSourceLine(s *strings.Builder, rowWidth int) {
 			codec = audio
 		}
 	}
+	return codec
+}
 
+// writeFrameLine writes a frame counter on the left and right-aligns the codec
+// info so its last cell ends at rowWidth (the gauge-cards row width). The gap is
+// floored at 1 cell so the two segments never collide or wrap. With no codec the
+// frame counter is written alone.
+func writeFrameLine(s *strings.Builder, frame, codec string, rowWidth int) {
 	if codec == "" {
 		s.WriteString(frame)
 		return
 	}
-
-	// Right-align the codec info so its last cell ends at rowWidth. Floor the gap
-	// at 1 cell so the two segments never collide or wrap.
 	gap := max(rowWidth-lipgloss.Width(frame)-lipgloss.Width(codec), 1)
 	s.WriteString(frame)
 	s.WriteString(strings.Repeat(" ", gap))
@@ -768,26 +816,6 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dms", d.Milliseconds())
 	}
 	return fmt.Sprintf("%.1fs", d.Seconds())
-}
-
-func formatBytes(bytes int64) string {
-	if bytes == 0 {
-		return "0 B"
-	}
-
-	const unit = 1024
-	if bytes < unit {
-		return fmt.Sprintf("%d B", bytes)
-	}
-
-	div, exp := int64(unit), 0
-	for n := bytes / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-
-	units := []string{"KB", "MB", "GB"}
-	return fmt.Sprintf("%.1f %s", float64(bytes)/float64(div), units[exp])
 }
 
 // formatSizeGlyph formats a byte count for the compact Size gauge card. MB and
