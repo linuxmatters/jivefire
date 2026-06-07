@@ -61,7 +61,7 @@ Require ./jivefire
 
 Set Shell "fish"
 Set FontSize 13
-Set Width 840
+Set Width 820
 Set Height 760
 Set Padding 8
 Set WindowBar ColorfulRight
@@ -69,6 +69,6 @@ Set WindowBarSize 32
 Set TypingSpeed 27ms
 Set Theme catppuccin-mocha
 
-Type "./jivefire --episode=0 --title='Linux Matters Jivefire' testdata/LMP0.flac testdata/LMP0.mp4" Sleep 250ms  Enter
+Type "./jivefire --episode=69 --title='Linux Matters' testdata/LMP69s.flac testdata/LMP69.mp4" Sleep 250ms  Enter
 
-Sleep 10s
+Sleep 13s
