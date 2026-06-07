@@ -148,13 +148,5 @@ func (m *Model) renderComplete() string {
 // double border. Cell styling (labels, values, gaps) is applied per-table via
 // StyleFunc.
 func summaryTable() *table.Table {
-	return table.New().
-		Border(lipgloss.HiddenBorder()).
-		BorderTop(false).
-		BorderBottom(false).
-		BorderLeft(false).
-		BorderRight(false).
-		BorderHeader(false).
-		BorderColumn(false).
-		BorderRow(false)
+	return theme.BorderlessTable()
 }

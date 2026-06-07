@@ -617,7 +617,6 @@ func runPass2(p *tea.Program, profile *audio.Profile, cfg pass2Config) {
 
 	// Flush any remaining audio after all video frames are written
 	// This encodes any samples remaining in the FIFO and flushes the encoder
-	finalizeStart := time.Now()
 	if err := enc.FlushAudioEncoder(); err != nil {
 		cli.PrintError(fmt.Sprintf("error flushing audio: %v", err))
 		p.Quit()
@@ -630,10 +629,6 @@ func runPass2(p *tea.Program, profile *audio.Profile, cfg pass2Config) {
 		p.Quit()
 		return
 	}
-	totalFinalize := time.Since(finalizeStart)
-
-	// Calculate total time (from Pass 2 render start, not including Pass 1)
-	totalTime := time.Since(renderStartTime)
 
 	// Get actual file size
 	fileInfo, err := os.Stat(cfg.outputFile)
@@ -651,13 +646,11 @@ func runPass2(p *tea.Program, profile *audio.Profile, cfg pass2Config) {
 	// Send completion message
 	p.Send(ui.RenderComplete{
 		OutputFile:       cfg.outputFile,
-		Duration:         totalTime,
 		FileSize:         actualFileSize,
 		TotalFrames:      numFrames,
 		VisTime:          totalVis,
 		EncodeTime:       totalEncode,
 		AudioTime:        totalAudio,
-		FinalizeTime:     totalFinalize,
 		TotalTime:        overallTotalTime,
 		ThumbnailTime:    cfg.thumbnailDuration,
 		SamplesProcessed: samplesProcessed,

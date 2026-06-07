@@ -87,15 +87,7 @@ func StyledHelpPrinter(options kong.HelpOptions) kong.HelpPrinter {
 // name column (flags or arguments) lines up regardless of name length. Borders
 // and column dividers are off; the StyleFunc keys on the column.
 func helpTable() *table.Table {
-	return table.New().
-		Border(lipgloss.HiddenBorder()).
-		BorderTop(false).
-		BorderBottom(false).
-		BorderLeft(false).
-		BorderRight(false).
-		BorderHeader(false).
-		BorderColumn(false).
-		BorderRow(false)
+	return theme.BorderlessTable()
 }
 
 // argumentTable renders parsed arguments into aligned name/help columns.

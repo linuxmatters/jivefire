@@ -64,13 +64,11 @@ type RenderProgress struct {
 // RenderComplete signals completion of Pass 2
 type RenderComplete struct {
 	OutputFile       string
-	Duration         time.Duration
 	FileSize         int64
 	TotalFrames      int
 	VisTime          time.Duration // Visualisation: FFT + binning + drawing
 	EncodeTime       time.Duration // Video encoding time
 	AudioTime        time.Duration // Audio reading + encoding time
-	FinalizeTime     time.Duration // Encoder finalization (flush + close)
 	TotalTime        time.Duration
 	ThumbnailTime    time.Duration
 	SamplesProcessed int64
