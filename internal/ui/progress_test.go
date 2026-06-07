@@ -234,7 +234,6 @@ func TestUpdateRenderComplete(t *testing.T) {
 	m.completionDelay = 0
 	msg := RenderComplete{
 		OutputFile:  "out.mp4",
-		Duration:    60 * time.Second,
 		FileSize:    2048,
 		TotalFrames: 1500,
 		TotalTime:   10 * time.Second,
