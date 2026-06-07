@@ -7,6 +7,7 @@ import (
 // Metadata holds information about an audio file
 type Metadata struct {
 	NumSamples int64
+	SampleRate int
 }
 
 // GetMetadata uses ffmpeg to extract accurate audio file metadata
@@ -29,5 +30,6 @@ func GetMetadata(filename string) (*Metadata, error) {
 
 	return &Metadata{
 		NumSamples: numSamples,
+		SampleRate: sampleRate,
 	}, nil
 }

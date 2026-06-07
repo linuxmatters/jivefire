@@ -859,6 +859,14 @@ func (e *Encoder) receiveAndWriteAudioPackets() error {
 	return nil
 }
 
+// channelLayoutName returns the human-readable name for a channel count.
+func channelLayoutName(channels int) string {
+	if channels == 2 {
+		return "stereo"
+	}
+	return "mono"
+}
+
 // WriteAudioSamples writes pre-decoded audio samples to the encoder.
 // Samples should be float32, mono or stereo interleaved depending on AudioChannels config.
 // For mono: just the samples. For stereo: L0, R0, L1, R1, ...
@@ -895,7 +903,7 @@ func (e *Encoder) WriteAudioSamples(samples []float32) error {
 
 		if writeErr != nil {
 			return fmt.Errorf("failed to write %s samples: %w",
-				map[int]string{1: "mono", 2: "stereo"}[outputChannels], writeErr)
+				channelLayoutName(outputChannels), writeErr)
 		}
 
 		// Set PTS
@@ -1024,16 +1032,15 @@ func writeStereoFloats(frame *ffmpeg.AVFrame, samples []float32) error {
 // Close finalizes the output file and frees resources
 func (e *Encoder) Close() error {
 	// Flush encoder
-	if e.videoCodec != nil {
+	if e.videoCodec != nil && e.pkt != nil {
 		_, _ = ffmpeg.AVCodecSendFrame(e.videoCodec, nil)
 
-		// Drain remaining packets
+		// Drain remaining packets, reusing the shared e.pkt (freed once below).
+		pkt := e.pkt
 		for {
-			pkt := ffmpeg.AVPacketAlloc()
 			ret, err := ffmpeg.AVCodecReceivePacket(e.videoCodec, pkt)
 
 			if errors.Is(err, ffmpeg.AVErrorEOF) || errors.Is(err, ffmpeg.EAgain) {
-				ffmpeg.AVPacketFree(&pkt)
 				break
 			}
 
@@ -1041,9 +1048,8 @@ func (e *Encoder) Close() error {
 				pkt.SetStreamIndex(e.videoStream.Index())
 				ffmpeg.AVPacketRescaleTs(pkt, e.videoCodec.TimeBase(), e.videoStream.TimeBase())
 				_, _ = ffmpeg.AVInterleavedWriteFrame(e.formatCtx, pkt)
+				ffmpeg.AVPacketUnref(pkt)
 			}
-
-			ffmpeg.AVPacketFree(&pkt)
 		}
 	}
 

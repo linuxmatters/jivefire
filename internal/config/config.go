@@ -15,6 +15,10 @@ const (
 
 // Audio settings
 const (
+	// SampleRate is the reference/default audio sample rate in Hz. The encoder
+	// and per-frame sample budget use the input file's actual rate
+	// (reader.SampleRate()); this constant is a documented default used for
+	// synthetic test signals and as a fallback reference.
 	SampleRate = 44100
 	FFTSize    = 2048
 )
