@@ -28,6 +28,11 @@ var (
 			Bold(true).
 			Foreground(theme.JivefireRed)
 
+	// Warning message style
+	WarningStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(theme.GoldOrange)
+
 	// Highlight style for important values
 	HighlightStyle = lipgloss.NewStyle().
 			Bold(true).
@@ -78,4 +83,9 @@ func PrintHardwareProbe(encoders []EncoderInfo) {
 // PrintError prints an error message
 func PrintError(message string) {
 	fmt.Fprintf(os.Stderr, "%s %s\n", ErrorStyle.Render("Error:"), message)
+}
+
+// PrintWarning prints a warning message
+func PrintWarning(message string) {
+	fmt.Fprintf(os.Stderr, "%s %s\n", WarningStyle.Render("Warning:"), message)
 }

@@ -206,8 +206,10 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 		os.Exit(1)
 	}
 
-	// Calculate estimated total frames for Pass 1 progress
-	samplesPerFrame := config.SampleRate / config.FPS
+	// Calculate estimated total frames for Pass 1 progress.
+	// Use the file's actual sample rate so each frame maps to 1/FPS seconds
+	// of audio regardless of input rate.
+	samplesPerFrame := metadata.SampleRate / config.FPS
 	estimatedTotalFrames := int(metadata.NumSamples) / samplesPerFrame
 
 	// Create unified Bubbletea program for both passes
@@ -219,6 +221,9 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 	// Shared state between goroutines
 	var profile *audio.Profile
 	var analysisErr error
+	// Non-fatal asset warnings collected during Pass 2, printed after the alt
+	// screen exits so they survive the Bubbletea TUI.
+	var assetWarnings []string
 
 	// Run both passes in a single goroutine
 	go func() {
@@ -255,7 +260,7 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 		})
 
 		// === PASS 2: Rendering & Encoding ===
-		runPass2(p, profile, pass2Config{
+		assetWarnings = runPass2(p, profile, pass2Config{
 			inputFile:         inputFile,
 			outputFile:        outputFile,
 			channels:          channels,
@@ -273,6 +278,11 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 	if err != nil {
 		cli.PrintError(fmt.Sprintf("running UI: %v", err))
 		os.Exit(1)
+	}
+
+	// Surface any non-fatal asset-load warnings now the alt screen is gone.
+	for _, w := range assetWarnings {
+		cli.PrintWarning(w)
 	}
 
 	// Print completion summary after exiting alternate screen
@@ -314,7 +324,10 @@ func expandMonoToStereo(dst []float32, src []float64, n int) {
 	}
 }
 
-func runPass2(p *tea.Program, profile *audio.Profile, cfg pass2Config) {
+// runPass2 returns any non-fatal warnings collected during rendering (e.g. an
+// asset that failed to load and was dropped). Callers print them after the
+// Bubbletea alt screen exits so they stay visible.
+func runPass2(p *tea.Program, profile *audio.Profile, cfg pass2Config) (warnings []string) {
 	// Open streaming reader for Pass 2
 	reader, err := audio.NewStreamingReader(cfg.inputFile)
 	if err != nil {
@@ -349,16 +362,27 @@ func runPass2(p *tea.Program, profile *audio.Profile, cfg pass2Config) {
 
 	defer enc.Close()
 
-	// Load background image (custom or embedded)
+	// Load background image (custom or embedded). A load failure is non-fatal:
+	// the renderer tolerates a nil background, but warn so the dropped asset is
+	// not silent (a malformed --background-image otherwise vanishes without a
+	// trace).
 	bgImage, err := renderer.LoadBackgroundImage(cfg.runtimeConfig)
 	if err != nil {
 		bgImage = nil
+		if _, isCustom := cfg.runtimeConfig.GetBackgroundImagePath(); isCustom {
+			warnings = append(warnings, fmt.Sprintf("could not load background image, rendering without it: %v", err))
+		} else {
+			warnings = append(warnings, fmt.Sprintf("could not load embedded default background, rendering without it: %v", err))
+		}
 	}
 
-	// Load font for center text (embedded)
+	// Load font for centre text (embedded). A nil face degrades gracefully, but
+	// a failed load of the embedded font signals an internal problem worth
+	// surfacing.
 	fontFace, err := renderer.LoadFont(48)
 	if err != nil {
 		fontFace = nil
+		warnings = append(warnings, fmt.Sprintf("could not load embedded font, rendering without centre text: %v", err))
 	}
 
 	// Create audio processor and frame renderer
@@ -415,8 +439,10 @@ func runPass2(p *tea.Program, profile *audio.Profile, cfg pass2Config) {
 	// Auto-sensitivity adjustment
 	sensitivity := 1.0
 
-	// Sliding buffer for FFT: we read samplesPerFrame but need FFTSize for FFT
-	samplesPerFrame := config.SampleRate / config.FPS
+	// Sliding buffer for FFT: we read samplesPerFrame but need FFTSize for FFT.
+	// Derive from the file's actual sample rate so encoded audio and video
+	// durations stay aligned for any input rate.
+	samplesPerFrame := reader.SampleRate() / config.FPS
 	fftBuffer := make([]float64, config.FFTSize)
 
 	// Pre-allocate reusable buffers for audio processing (avoid per-frame allocations)
@@ -693,4 +719,6 @@ func runPass2(p *tea.Program, profile *audio.Profile, cfg pass2Config) {
 		EncoderName:      enc.EncoderName(),
 		EncoderIsHW:      enc.IsHardware(),
 	})
+
+	return warnings
 }
