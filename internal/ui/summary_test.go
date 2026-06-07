@@ -55,7 +55,6 @@ func TestRenderCompleteUsesTable(t *testing.T) {
 	wantSubstrings := []string{
 		"Pass 1: Audio Analysis",
 		"Pass 2: Rendering & Encoding",
-		"Duration:", "185.0s",
 		"Peak Level:", "-1.2 dB",
 		"RMS Level:", "-14.8 dB",
 		"Dynamic Range:", "13.6 dB",
@@ -70,6 +69,22 @@ func TestRenderCompleteUsesTable(t *testing.T) {
 	for _, want := range wantSubstrings {
 		if !strings.Contains(out, want) {
 			t.Errorf("completion summary missing %q", want)
+		}
+	}
+
+	// The finished Pass 2 box now carries the encoder, source duration and file
+	// size, so the summary must no longer duplicate those rows, nor the Pass 1
+	// Duration row.
+	notWantSubstrings := []string{
+		"Encoder:",
+		"Size:",
+		"Duration:",
+		"185.0s",
+		"10.0 MB",
+	}
+	for _, notWant := range notWantSubstrings {
+		if strings.Contains(out, notWant) {
+			t.Errorf("completion summary still contains removed row %q", notWant)
 		}
 	}
 
