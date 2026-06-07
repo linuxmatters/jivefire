@@ -3,6 +3,8 @@ package ui
 import (
 	"strings"
 	"testing"
+
+	"github.com/linuxmatters/jivefire/internal/theme"
 )
 
 // TestSparklineEmpty verifies an empty series renders nothing rather than
@@ -67,61 +69,12 @@ func TestSparklineFlat(t *testing.T) {
 	}
 }
 
-// TestMeterFillBounds verifies the meter fills no cells at 0%, all cells at 100%,
-// and a partial count in between, with a stable rendered width across fractions.
-func TestMeterFillBounds(t *testing.T) {
-	const barWidth = 10
-	count := func(frac float64) (full, empty, width int) {
-		out := stripStyles(meter("L", frac, barWidth, 4, "v"))
-		full = strings.Count(out, "█")
-		empty = strings.Count(out, "░")
-		width = len([]rune(out))
-		return
-	}
-
-	full0, empty0, w0 := count(0)
-	if full0 != 0 || empty0 != barWidth {
-		t.Errorf("0%% meter: full=%d empty=%d, want full=0 empty=%d", full0, empty0, barWidth)
-	}
-
-	full1, empty1, w1 := count(1)
-	if full1 != barWidth || empty1 != 0 {
-		t.Errorf("100%% meter: full=%d empty=%d, want full=%d empty=0", full1, empty1, barWidth)
-	}
-
-	fullM, emptyM, wM := count(0.5)
-	if fullM <= 0 || fullM >= barWidth {
-		t.Errorf("50%% meter: full=%d, want partial (0 < full < %d)", fullM, barWidth)
-	}
-	if fullM+emptyM != barWidth {
-		t.Errorf("50%% meter: full+empty=%d, want %d", fullM+emptyM, barWidth)
-	}
-
-	if w0 != w1 || w0 != wM {
-		t.Errorf("meter width unstable across fractions: %d, %d, %d", w0, w1, wM)
-	}
-}
-
-// TestMeterClampsOutOfRange verifies fractions outside [0,1] clamp to empty/full
-// rather than over- or under-filling.
-func TestMeterClampsOutOfRange(t *testing.T) {
-	const barWidth = 8
-	lo := stripStyles(meter("L", -0.5, barWidth, 4, "v"))
-	hi := stripStyles(meter("L", 1.5, barWidth, 4, "v"))
-	if strings.Count(lo, "█") != 0 {
-		t.Errorf("negative fraction filled cells: %q", lo)
-	}
-	if strings.Count(hi, "█") != barWidth {
-		t.Errorf("over-unit fraction did not fill: %q", hi)
-	}
-}
-
 // TestGaugeCardStableWidth verifies a card's rendered width is driven by its
 // inner width and stays stable whether the value is short or overflows (it is
 // truncated, not wrapped).
 func TestGaugeCardStableWidth(t *testing.T) {
-	short := gaugeCard("⏱", "Time", "1s", 12)
-	long := gaugeCard("⏱", "Time", "this value is far too long to fit the card", 12)
+	short := gaugeCard("⏱", theme.WarmGray, "Time", "1s", 12)
+	long := gaugeCard("⏱", theme.WarmGray, "Time", "this value is far too long to fit the card", 12)
 	if ws, wl := maxLineWidth(short), maxLineWidth(long); ws != wl {
 		t.Errorf("card width unstable: short=%d long=%d", ws, wl)
 	}

@@ -411,7 +411,6 @@ func (m *Model) renderFinalProgress() string {
 
 	// Progress bar at 100%
 	progressBar := m.progressBar.ViewAs(1.0)
-	s.WriteString("Progress: ")
 	s.WriteString(progressBar)
 	s.WriteString("  100%")
 	s.WriteString("\n\n")
@@ -425,10 +424,6 @@ func (m *Model) renderFinalProgress() string {
 	s.WriteString(lipgloss.NewStyle().Faint(true).Render(
 		fmt.Sprintf("Time: %s  │  Speed: %.1fx realtime  │  Complete", formatDuration(m.complete.TotalTime), finalSpeed)))
 	s.WriteString("\n")
-
-	// Audio Profile
-	s.WriteString("\n")
-	m.renderAudioProfile(&s)
 
 	// Final spectrum - zeroed out to show clean state. Derive the width from the
 	// shared box width (outer minus the 1-cell border and 2 columns of padding on
@@ -480,10 +475,6 @@ func (m *Model) renderProgress() string {
 		m.renderRenderingProgress(&s)
 	}
 
-	// Audio Profile (always shown, placeholder if not yet available)
-	s.WriteString("\n")
-	m.renderAudioProfile(&s)
-
 	// Spectrum (Pass 2 only)
 	if m.phase == PhaseRendering && len(m.renderState.BarHeights) > 0 {
 		s.WriteString("\n")
@@ -518,23 +509,21 @@ func (m *Model) renderAnalysisProgress(s *strings.Builder) {
 		percent := float64(m.analysisProgress.Frame) / float64(m.analysisProgress.TotalFrames)
 		progressBar := m.progressBar.View()
 
-		s.WriteString("Progress: ")
 		s.WriteString(progressBar)
 		fmt.Fprintf(s, "  %d%%", int(percent*100))
-		s.WriteString("\n\n")
 	case m.analysisProgress.Frame > 0:
 		// No total, show frame count with elapsed time. Spinner signals live work.
 		s.WriteString(m.spinner.View())
 		s.WriteString(" ")
 		s.WriteString(lipgloss.NewStyle().Faint(true).Render("Analysing..."))
-		fmt.Fprintf(s, "  %d frames  │  Elapsed: %s\n\n",
+		fmt.Fprintf(s, "  %d frames  │  Elapsed: %s",
 			m.analysisProgress.Frame,
 			formatDuration(m.analysisProgress.Duration))
 	default:
 		// Dead air before any frames arrive: spinner is the only motion.
 		s.WriteString(m.spinner.View())
 		s.WriteString(" ")
-		s.WriteString(lipgloss.NewStyle().Faint(true).Render("Starting analysis...\n\n"))
+		s.WriteString(lipgloss.NewStyle().Faint(true).Render("Starting analysis..."))
 	}
 }
 
@@ -543,7 +532,7 @@ func (m *Model) renderRenderingProgress(s *strings.Builder) {
 		// Dead air before the first render frame: spinner is the only motion.
 		s.WriteString(m.spinner.View())
 		s.WriteString(" ")
-		s.WriteString(lipgloss.NewStyle().Faint(true).Render("Starting render...\n\n"))
+		s.WriteString(lipgloss.NewStyle().Faint(true).Render("Starting render..."))
 		return
 	}
 
@@ -551,7 +540,6 @@ func (m *Model) renderRenderingProgress(s *strings.Builder) {
 	percent := float64(m.renderState.Frame) / float64(m.renderState.TotalFrames)
 
 	progressBar := m.progressBar.View()
-	s.WriteString("Progress ")
 	s.WriteString(progressBar)
 	fmt.Fprintf(s, "  %d%%", int(percent*100))
 	s.WriteString("\n\n")
@@ -581,11 +569,11 @@ func (m *Model) renderRenderingProgress(s *strings.Builder) {
 	// Three stat gauge cards joined horizontally: Time, Speed (with a live
 	// sparkline of recent speed samples), and ETA. The card inner widths are
 	// chosen so the joined row fits the box content area without wrapping.
-	timeCard := gaugeCard("⏱", "Time", fmt.Sprintf("%s / %s",
+	timeCard := gaugeCard("⏱", lipgloss.Color("#FFFFFF"), "Time", fmt.Sprintf("%s / %s",
 		formatDuration(elapsed), formatDuration(estimatedTotal)), 14)
 	speedValue := fmt.Sprintf("%.1fx %s", speed, sparkline(m.speedHistory))
-	speedCard := gaugeCard("⚡", "Speed", speedValue, 12)
-	etaCard := gaugeCard("⛳", "ETA", formatDuration(eta), 13)
+	speedCard := gaugeCard("⚡", theme.WarmGray, "Speed", speedValue, 12)
+	etaCard := gaugeCard("🞋", lipgloss.Color("#FF2D2D"), "ETA", formatDuration(eta), 13)
 
 	s.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, timeCard, " ", speedCard, " ", etaCard))
 

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"image/color"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -56,12 +57,11 @@ func sparkline(samples []float64) string {
 // border and a value line beneath. The card is sized to innerWidth content
 // cells (the value line is padded/truncated to that width) so several cards join
 // cleanly with lipgloss.JoinHorizontal. The border uses the fire theme colour.
-func gaugeCard(icon, label, value string, innerWidth int) string {
+// iconColour styles just the glyph; the label keeps the WarmGray header colour.
+func gaugeCard(icon string, iconColour color.Color, label, value string, innerWidth int) string {
 	if innerWidth < 1 {
 		innerWidth = 1
 	}
-
-	header := strings.TrimSpace(icon + " " + label)
 
 	body := lipgloss.NewStyle().
 		Width(innerWidth).
@@ -73,64 +73,29 @@ func gaugeCard(icon, label, value string, innerWidth int) string {
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(theme.FireOrange).
 		Padding(0, 1).
-		Render(headerLine(header, innerWidth) + "\n" + body)
+		Render(headerLine(icon, iconColour, label, innerWidth) + "\n" + body)
 }
 
 // headerLine renders the card header (icon + label) clamped to the inner width
-// so a long label never widens the card past its joined neighbours.
-func headerLine(header string, innerWidth int) string {
-	return lipgloss.NewStyle().
-		Width(innerWidth).
-		Foreground(theme.WarmGray).
-		Render(truncateCells(header, innerWidth))
-}
-
-// meter renders a horizontal level meter of the form
-// "label ▕<filled><track>▏ value" where the filled portion is coloured with the
-// fire gradient on a dim track. fraction is clamped to [0,1]; barWidth is the
-// number of cells in the bar between the ▕ ▏ caps. The label is left-padded to
-// labelWidth so stacked meters align their bars.
-func meter(label string, fraction float64, barWidth, labelWidth int, value string) string {
-	if fraction < 0 {
-		fraction = 0
-	}
-	if fraction > 1 {
-		fraction = 1
-	}
-	if barWidth < 1 {
-		barWidth = 1
+// so a long label never widens the card past its joined neighbours. The icon is
+// coloured with iconColour while the label uses the WarmGray header colour; the
+// plain "icon label" text drives the width clamp so styling never miscounts
+// cells.
+func headerLine(icon string, iconColour color.Color, label string, innerWidth int) string {
+	plain := strings.TrimSpace(icon + " " + label)
+	if lipgloss.Width(plain) > innerWidth {
+		// A long label is truncated as before, with no per-glyph colouring so the
+		// clamp stays simple and the card never widens past its neighbours.
+		return lipgloss.NewStyle().
+			Width(innerWidth).
+			Foreground(theme.WarmGray).
+			Render(truncateCells(plain, innerWidth))
 	}
 
-	filled := min(int(fraction*float64(barWidth)), barWidth)
-
-	labelStyle := lipgloss.NewStyle().Foreground(theme.WarmGray).Width(labelWidth)
-	capStyle := lipgloss.NewStyle().Foreground(theme.WarmGray)
-	trackStyle := lipgloss.NewStyle().Foreground(theme.WarmGray)
-
-	var bar strings.Builder
-	ramp := theme.FireSpectrum
-	for i := 0; i < barWidth; i++ {
-		if i < filled {
-			// Colour each filled cell along the fire ramp by its position in the
-			// bar, matching the spectrum's per-cell colouring approach.
-			idx := colorClamp(float64(i)/float64(barWidth), len(ramp))
-			bar.WriteString(lipgloss.NewStyle().
-				Foreground(ramp[idx]). //nolint:gosec // index clamped by colorClamp
-				Render("█"))
-		} else {
-			bar.WriteString(trackStyle.Render("░"))
-		}
-	}
-
-	return lipgloss.JoinHorizontal(lipgloss.Top,
-		labelStyle.Render(label),
-		" ",
-		capStyle.Render("▕"),
-		bar.String(),
-		capStyle.Render("▏"),
-		" ",
-		value,
-	)
+	styledIcon := lipgloss.NewStyle().Foreground(iconColour).Render(icon)
+	styledLabel := lipgloss.NewStyle().Foreground(theme.WarmGray).Render(label)
+	header := lipgloss.JoinHorizontal(lipgloss.Top, styledIcon, " ", styledLabel)
+	return lipgloss.NewStyle().Width(innerWidth).Render(header)
 }
 
 // truncateCells trims s to at most width terminal cells. It strips no styles, so
