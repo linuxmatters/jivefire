@@ -210,6 +210,10 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 	// Use the file's actual sample rate so each frame maps to 1/FPS seconds
 	// of audio regardless of input rate.
 	samplesPerFrame := metadata.SampleRate / config.FPS
+	if samplesPerFrame <= 0 {
+		cli.PrintError(fmt.Sprintf("input sample rate too low for %d FPS: %d Hz", config.FPS, metadata.SampleRate))
+		os.Exit(1)
+	}
 	estimatedTotalFrames := int(metadata.NumSamples) / samplesPerFrame
 
 	// Create unified Bubbletea program for both passes
@@ -221,9 +225,6 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 	// Shared state between goroutines
 	var profile *audio.Profile
 	var analysisErr error
-	// Non-fatal asset warnings collected during Pass 2, printed after the alt
-	// screen exits so they survive the Bubbletea TUI.
-	var assetWarnings []string
 
 	// Run both passes in a single goroutine
 	go func() {
@@ -260,7 +261,7 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 		})
 
 		// === PASS 2: Rendering & Encoding ===
-		assetWarnings = runPass2(p, profile, pass2Config{
+		runPass2(p, profile, pass2Config{
 			inputFile:         inputFile,
 			outputFile:        outputFile,
 			channels:          channels,
@@ -280,13 +281,13 @@ func generateVideo(inputFile string, outputFile string, channels int, noPreview 
 		os.Exit(1)
 	}
 
-	// Surface any non-fatal asset-load warnings now the alt screen is gone.
-	for _, w := range assetWarnings {
-		cli.PrintWarning(w)
-	}
-
-	// Print completion summary after exiting alternate screen
+	// Surface results from the final model now the alt screen is gone. The
+	// warnings travelled on the RenderComplete message, so reading them here is
+	// synchronised by p.Run() returning.
 	if m, ok := finalModel.(*ui.Model); ok {
+		for _, w := range m.AssetWarnings() {
+			cli.PrintWarning(w)
+		}
 		if summary := m.CompletionSummary(); summary != "" {
 			fmt.Println(summary)
 		}
@@ -324,10 +325,11 @@ func expandMonoToStereo(dst []float32, src []float64, n int) {
 	}
 }
 
-// runPass2 returns any non-fatal warnings collected during rendering (e.g. an
-// asset that failed to load and was dropped). Callers print them after the
-// Bubbletea alt screen exits so they stay visible.
-func runPass2(p *tea.Program, profile *audio.Profile, cfg pass2Config) (warnings []string) {
+// runPass2 collects any non-fatal warnings during rendering (e.g. an asset that
+// failed to load and was dropped) and delivers them on the RenderComplete
+// message so the caller can print them after the Bubbletea alt screen exits.
+func runPass2(p *tea.Program, profile *audio.Profile, cfg pass2Config) {
+	var warnings []string
 	// Open streaming reader for Pass 2
 	reader, err := audio.NewStreamingReader(cfg.inputFile)
 	if err != nil {
@@ -718,7 +720,6 @@ func runPass2(p *tea.Program, profile *audio.Profile, cfg pass2Config) (warnings
 		SamplesProcessed: samplesProcessed,
 		EncoderName:      enc.EncoderName(),
 		EncoderIsHW:      enc.IsHardware(),
+		AssetWarnings:    warnings,
 	})
-
-	return warnings
 }

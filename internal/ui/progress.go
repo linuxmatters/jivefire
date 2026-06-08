@@ -74,6 +74,12 @@ type RenderComplete struct {
 	SamplesProcessed int64
 	EncoderName      string // Video encoder used (e.g., "h264_nvenc", "libx264")
 	EncoderIsHW      bool   // Whether the encoder was hardware-backed
+
+	// AssetWarnings carries non-fatal asset-load warnings collected during Pass
+	// 2. Routing them through this message means they cross the same channel as
+	// the completion signal, so the caller reads them from the final model after
+	// p.Run() returns without a data race on a shared slice.
+	AssetWarnings []string
 }
 
 // AudioProfile holds the audio analysis results for display
@@ -419,6 +425,15 @@ func (m *Model) CompletionSummary() string {
 		return ""
 	}
 	return m.renderFinalProgress() + "\n" + m.renderComplete()
+}
+
+// AssetWarnings returns the non-fatal asset-load warnings delivered with the
+// RenderComplete message, or nil if Pass 2 did not complete.
+func (m *Model) AssetWarnings() []string {
+	if m.complete == nil {
+		return nil
+	}
+	return m.complete.AssetWarnings
 }
 
 // renderFinalProgress renders the progress UI in its final completed state

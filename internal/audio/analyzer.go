@@ -58,6 +58,9 @@ func AnalyzeAudio(filename string, progressCb ProgressCallback) (*Profile, error
 	// Calculate frame size from the file's actual sample rate so each frame
 	// maps to 1/FPS seconds of audio regardless of input rate.
 	samplesPerFrame := reader.SampleRate() / config.FPS
+	if samplesPerFrame <= 0 {
+		return nil, fmt.Errorf("input sample rate too low for %d FPS: %d Hz", config.FPS, reader.SampleRate())
+	}
 
 	// Create FFT processor
 	processor := NewProcessor()
