@@ -385,7 +385,7 @@ func runPass2(p *tea.Program, profile *audio.Profile, cfg pass2Config) {
 	if cfg.channels == 2 {
 		audioChannelStr = "stereo"
 	}
-	audioCodecInfo := fmt.Sprintf("AAC %.1fkHz %s", float64(audioSampleRate)/1000.0, audioChannelStr)
+	audioCodecInfo := fmt.Sprintf("AAC %.1f㎑ %s", float64(audioSampleRate)/1000.0, audioChannelStr)
 
 	// Harmonica spring peak-hold state. Each bar rises INSTANTLY to a new high,
 	// then springs DOWN toward the raw level over subsequent frames. The spring

@@ -468,7 +468,7 @@ func (m *Model) renderFinalProgress() string {
 	}
 
 	timeCard := gaugeCard("⏱", lipgloss.Color("#FFFFFF"), "Time", formatDuration(m.complete.TotalTime), finalCardWidth)
-	speedCard := gaugeCard("⚡", theme.WarmGray, "Speed", fmt.Sprintf("%.1fx", finalSpeed), finalCardWidth)
+	speedCard := gaugeCard("⚡", theme.WarmGray, "Speed", fmt.Sprintf("%.1f×", finalSpeed), finalCardWidth)
 	sizeCard := gaugeCard("🖬", lipgloss.Color("#FF8C00"), "Size", formatSizeGlyph(m.complete.FileSize), finalCardWidth)
 	durationCard := gaugeCard("🎜", lipgloss.Color("#FF2D2D"), "Duration", formatDuration(sourceDuration), finalCardWidth)
 
@@ -606,11 +606,11 @@ func (m *Model) renderRenderingProgress(s *strings.Builder) {
 	// The card inner widths are chosen so the joined row plus its three
 	// separators fits the 74-cell box content area without wrapping.
 	timeCard := gaugeCard("⏱", lipgloss.Color("#FFFFFF"), "Time", fmt.Sprintf("%s / %s",
-		formatDuration(elapsed), formatDuration(estimatedTotal)), 13)
-	speedValue := fmt.Sprintf("%.1fx %s", speed, sparkline(m.speedHistory))
+		formatClock(elapsed), formatClock(estimatedTotal)), 13)
+	speedValue := fmt.Sprintf("%.1f× %s", speed, sparkline(m.speedHistory))
 	speedCard := gaugeCard("⚡", theme.WarmGray, "Speed", speedValue, 12)
 	sizeCard := gaugeCard("🖬", lipgloss.Color("#FF8C00"), "Size", formatSizeGlyph(m.renderState.FileSize), 11)
-	etaCard := gaugeCard("🞋", lipgloss.Color("#FF2D2D"), "ETA", formatDuration(eta), 10)
+	etaCard := gaugeCard("🞋", lipgloss.Color("#FF2D2D"), "ETA", formatClock(eta), 10)
 
 	cardsRow := lipgloss.JoinHorizontal(lipgloss.Top, timeCard, " ", speedCard, " ", sizeCard, " ", etaCard)
 	s.WriteString(cardsRow)
@@ -774,7 +774,7 @@ func writeFrameLine(s *strings.Builder, frame, codec string, rowWidth int) {
 
 // compactCodec shortens a codec description for the one-line source summary by
 // dropping the resolution/layout suffix: "H.264 1920×1080" → "H.264" and
-// "AAC 44.1kHz stereo" → "AAC 44.1kHz". Tokens beyond a ×-bearing or layout
+// "AAC 44.1㎑ stereo" → "AAC 44.1㎑". Tokens beyond a ×-bearing or layout
 // token are dropped so the frame/source line never wraps the box.
 func compactCodec(codec string) string {
 	fields := strings.Fields(codec)
@@ -800,6 +800,24 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dms", d.Milliseconds())
 	}
 	return fmt.Sprintf("%.1fs", d.Seconds())
+}
+
+// formatClock renders a duration as a whole-second clock: MM:SS, scaling to
+// HH:MM:SS once an hour or more elapses. It drops the sub-second component so
+// the live Time and ETA cards stop flickering on every repaint while keeping a
+// roughly fixed character width. Negative durations clamp to zero.
+func formatClock(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	total := int(d.Round(time.Second).Seconds())
+	h := total / 3600
+	m := (total % 3600) / 60
+	s := total % 60
+	if h > 0 {
+		return fmt.Sprintf("%d:%02d:%02d", h, m, s)
+	}
+	return fmt.Sprintf("%02d:%02d", m, s)
 }
 
 // formatSizeGlyph formats a byte count for the compact Size gauge card. MB and
