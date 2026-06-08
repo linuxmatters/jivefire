@@ -39,7 +39,7 @@ Your podcast audio deserves more than a static image on YouTube. Jivefire transf
 ./jivefire --title="Linux Matters" input.wav output.mp4
 ```
 
-`--episode` is optional. Omitting it suppresses the episode number overlay entirely — useful for archive or bonus audio that has no episode number. Passing `--episode=0` still renders `0` on-screen; absence is what controls the overlay, not the value.
+`--episode` is optional. Omitting it suppresses the episode number overlay entirely — useful for archive or bonus audio that has no episode number. Passing `--episode=0` still renders `00` on-screen (single-digit values are zero-padded, so `5` renders as `05`); absence is what controls the overlay, not the value.
 
 ### Example
 
