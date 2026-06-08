@@ -50,7 +50,7 @@ func boxWidthFixture(t *testing.T, width int) *Model {
 		TotalFrames: 1000,
 		FileSize:    12345678,
 		VideoCodec:  "H.264 1920×1080",
-		AudioCodec:  "AAC 44.1kHz stereo",
+		AudioCodec:  "AAC 44.1㎑ stereo",
 		EncoderName: "h264_vaapi",
 		BarHeights:  bars,
 		FrameData:   image.NewRGBA(image.Rect(0, 0, 1920, 1080)),
@@ -176,7 +176,7 @@ func TestCodecLineRightAlignsToCardsRow(t *testing.T) {
 	if w := lipgloss.Width(codecLine); w != wantWidth {
 		t.Errorf("codec line width = %d, want %d (cards-row width)", w, wantWidth)
 	}
-	if !strings.HasSuffix(codecLine, "AAC 44.1kHz") {
+	if !strings.HasSuffix(codecLine, "AAC 44.1㎑") {
 		t.Errorf("codec line should end with the audio codec, got %q", codecLine)
 	}
 	if !strings.Contains(codecLine, "H.264 (h264_vaapi)") {

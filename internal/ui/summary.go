@@ -64,9 +64,9 @@ func (m *Model) renderComplete() string {
 			}
 			return valueStyle
 		})
-		pass1.Row("Peak Level:", fmt.Sprintf("%.1f dB", m.audioProfile.PeakLevel))
-		pass1.Row("RMS Level:", fmt.Sprintf("%.1f dB", m.audioProfile.RMSLevel))
-		pass1.Row("Dynamic Range:", fmt.Sprintf("%.1f dB", m.audioProfile.DynamicRange))
+		pass1.Row("Peak Level:", fmt.Sprintf("%.1f ㏈", m.audioProfile.PeakLevel))
+		pass1.Row("RMS Level:", fmt.Sprintf("%.1f ㏈", m.audioProfile.RMSLevel))
+		pass1.Row("Dynamic Range:", fmt.Sprintf("%.1f ㏈", m.audioProfile.DynamicRange))
 		pass1.Row("Optimal Scale:", fmt.Sprintf("%.3f", m.audioProfile.OptimalScale))
 		pass1.Row("Analysis Time:", highlightValueStyle.Render(formatDuration(m.audioProfile.AnalysisTime)))
 		s.WriteString(pass1.Render())

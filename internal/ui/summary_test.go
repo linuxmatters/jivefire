@@ -55,9 +55,9 @@ func TestRenderCompleteUsesTable(t *testing.T) {
 	wantSubstrings := []string{
 		"Pass 1: Audio Analysis",
 		"Pass 2: Rendering & Encoding",
-		"Peak Level:", "-1.2 dB",
-		"RMS Level:", "-14.8 dB",
-		"Dynamic Range:", "13.6 dB",
+		"Peak Level:", "-1.2 ㏈",
+		"RMS Level:", "-14.8 ㏈",
+		"Dynamic Range:", "13.6 ㏈",
 		"Optimal Scale:", "1.234",
 		"Analysis Time:", "1.5s",
 		"Thumbnail:",
